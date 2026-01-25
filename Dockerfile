@@ -35,20 +35,3 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile"]
 ```
 
-**Step 3:** Create another file in the **root**: `.dockerignore`
-
-**Step 4:** Paste this content:
-```
-node_modules
-dist
-.git
-.gitignore
-.env
-.env.local
-.env.*.local
-*.md
-.DS_Store
-.vscode
-.idea
-coverage
-*.log
