@@ -5,7 +5,7 @@
 
 import { ReactNode } from 'react'
 import Navigation from './Navigation'
-import { useSessionTimeout, clearSession } from '../../hooks/useSessionTimeout'
+import { useSessionTimeout } from '../../hooks/useSessionTimeout'
 import { useNavigate } from 'react-router-dom'
 import { useClerk } from '@clerk/clerk-react'
 
@@ -18,7 +18,6 @@ export default function Layout({ children }: LayoutProps) {
   const { signOut } = useClerk()
 
   const handleTimeout = async () => {
-    clearSession()
     try {
       await signOut()
     } catch {
@@ -27,15 +26,8 @@ export default function Layout({ children }: LayoutProps) {
     navigate('/login?reason=timeout')
   }
 
-  const handleWarning = () => {
-    // Could show a modal warning here
-    console.log('Session expiring soon')
-  }
-
   useSessionTimeout({
     onTimeout: handleTimeout,
-    onWarning: handleWarning,
-    warningBeforeMs: 60000, // 1 minute warning
   })
 
   return (
