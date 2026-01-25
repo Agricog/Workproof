@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
 import { ArrowLeft } from 'lucide-react'
 import { getTaskTypeConfig } from '../types/taskConfigs'
+import { trackTaskStarted, trackTaskCompleted } from '../utils/analytics'
 import type { Task, TaskStatus, EvidenceType } from '../types/models'
 import type { StoredEvidence } from '../utils/indexedDB'
 import PhotoCapture from '../components/capture/PhotoCapture'
@@ -56,14 +57,34 @@ export default function TaskDetail() {
   const handleCaptureStart = (evidenceType: string) => {
     setSelectedEvidenceType(evidenceType as EvidenceType)
     setShowCamera(true)
+    
+    // Track task started on first evidence capture
+    if (task && Object.keys(capturedEvidence).length === 0) {
+      trackTaskStarted(task.taskType)
+    }
   }
 
   const handleCaptureComplete = (evidence: StoredEvidence) => {
     if (evidence.evidenceType) {
-      setCapturedEvidence((prev) => ({
-        ...prev,
-        [evidence.evidenceType]: true,
-      }))
+      setCapturedEvidence((prev) => {
+        const updated = {
+          ...prev,
+          [evidence.evidenceType]: true,
+        }
+        
+        // Check if task is now complete
+        if (task) {
+          const config = getTaskTypeConfig(task.taskType)
+          const requiredCount = config.requiredEvidence.length
+          const capturedCount = Object.keys(updated).length
+          
+          if (capturedCount >= requiredCount) {
+            trackTaskCompleted(task.taskType, capturedCount)
+          }
+        }
+        
+        return updated
+      })
     }
     setShowCamera(false)
     setSelectedEvidenceType(null)
