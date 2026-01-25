@@ -4,7 +4,6 @@ import {
   User,
   Bell,
   Shield,
-  HardDrive,
   Trash2,
   ExternalLink,
   ChevronRight,
