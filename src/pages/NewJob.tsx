@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
 import { ArrowLeft, MapPin, User, Calendar, Plus } from 'lucide-react'
 import { validateAddress, validateClientName } from '../utils/validation'
-import { TASK_TYPE_CONFIGS, type TaskType } from '../types/taskConfigs'
+import { TASK_TYPE_CONFIGS } from '../types/taskConfigs'
+import type { TaskType } from '../types/models'
 import { captureError } from '../utils/errorTracking'
 
 interface FormData {
@@ -26,7 +27,7 @@ export default function NewJob() {
   const [formData, setFormData] = useState<FormData>({
     address: '',
     clientName: '',
-    startDate: new Date().toISOString().split('T')[0],
+    startDate: new Date().toISOString().split('T')[0] || '',
     selectedTasks: [],
   })
   const [errors, setErrors] = useState<FormErrors>({})
@@ -35,8 +36,11 @@ export default function NewJob() {
     setFormData((prev) => ({ ...prev, address: value }))
     const validation = validateAddress(value)
     if (!validation.isValid) {
-      const errorKey = Object.keys(validation.errors)[0]
-      setErrors((prev) => ({ ...prev, address: validation.errors[errorKey] }))
+      const errorKeys = Object.keys(validation.errors)
+      const errorKey = errorKeys[0]
+      if (errorKey) {
+        setErrors((prev) => ({ ...prev, address: validation.errors[errorKey] }))
+      }
     } else {
       setErrors((prev) => ({ ...prev, address: undefined }))
     }
@@ -46,8 +50,11 @@ export default function NewJob() {
     setFormData((prev) => ({ ...prev, clientName: value }))
     const validation = validateClientName(value)
     if (!validation.isValid) {
-      const errorKey = Object.keys(validation.errors)[0]
-      setErrors((prev) => ({ ...prev, clientName: validation.errors[errorKey] }))
+      const errorKeys = Object.keys(validation.errors)
+      const errorKey = errorKeys[0]
+      if (errorKey) {
+        setErrors((prev) => ({ ...prev, clientName: validation.errors[errorKey] }))
+      }
     } else {
       setErrors((prev) => ({ ...prev, clientName: undefined }))
     }
@@ -68,14 +75,20 @@ export default function NewJob() {
 
     const addressValidation = validateAddress(formData.address)
     if (!addressValidation.isValid) {
-      const errorKey = Object.keys(addressValidation.errors)[0]
-      newErrors.address = addressValidation.errors[errorKey]
+      const errorKeys = Object.keys(addressValidation.errors)
+      const errorKey = errorKeys[0]
+      if (errorKey) {
+        newErrors.address = addressValidation.errors[errorKey]
+      }
     }
 
     const clientValidation = validateClientName(formData.clientName)
     if (!clientValidation.isValid) {
-      const errorKey = Object.keys(clientValidation.errors)[0]
-      newErrors.clientName = clientValidation.errors[errorKey]
+      const errorKeys = Object.keys(clientValidation.errors)
+      const errorKey = errorKeys[0]
+      if (errorKey) {
+        newErrors.clientName = clientValidation.errors[errorKey]
+      }
     }
 
     if (!formData.startDate) {
@@ -113,7 +126,7 @@ export default function NewJob() {
     }
   }
 
-  const taskTypes = Object.entries(TASK_TYPE_CONFIGS) as [TaskType, typeof TASK_TYPE_CONFIGS[TaskType]][]
+  const taskTypes = Object.entries(TASK_TYPE_CONFIGS) as Array<[TaskType, (typeof TASK_TYPE_CONFIGS)[TaskType]]>
 
   return (
     <div>
