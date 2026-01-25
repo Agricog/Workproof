@@ -1,170 +1,243 @@
 /**
  * WorkProof Image Compression
- * Compress photos to 300KB for iOS PWA storage limits
+ * Optimized for iOS PWA 50MB limit
  */
 
-import type { CompressionOptions } from '../types/api'
+const TARGET_SIZE_KB = 300
+const MAX_DIMENSION = 2048
+const QUALITY_STEPS = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4]
 
-export const DEFAULT_COMPRESSION: CompressionOptions = {
-  maxWidth: 1920,
-  maxHeight: 1920,
-  quality: 0.7,
-  format: 'image/jpeg',
+export interface CompressionResult {
+  blob: Blob
+  width: number
+  height: number
+  originalSize: number
+  compressedSize: number
+  compressionRatio: number
 }
 
-// Target size: 300KB
-const TARGET_SIZE_BYTES = 300 * 1024
-
-// ============================================================================
-// MAIN COMPRESSION FUNCTION
-// ============================================================================
-
+/**
+ * Compress image to target size
+ */
 export async function compressImage(
   file: File | Blob,
-  options: Partial<CompressionOptions> = {}
-): Promise<Blob> {
-  const opts = { ...DEFAULT_COMPRESSION, ...options }
+  targetSizeKB: number = TARGET_SIZE_KB
+): Promise<CompressionResult> {
+  const originalSize = file.size
+  const targetSize = targetSizeKB * 1024
 
-  // Create image from file
-  const imageBitmap = await createImageBitmap(file)
+  // If already small enough, return as-is
+  if (originalSize <= targetSize) {
+    const dimensions = await getImageDimensions(file)
+    return {
+      blob: file instanceof File ? file : new Blob([file], { type: file.type }),
+      width: dimensions.width,
+      height: dimensions.height,
+      originalSize,
+      compressedSize: originalSize,
+      compressionRatio: 1,
+    }
+  }
 
-  // Calculate new dimensions
-  const { width, height } = calculateDimensions(
-    imageBitmap.width,
-    imageBitmap.height,
-    opts.maxWidth,
-    opts.maxHeight
-  )
+  // Load image
+  const img = await loadImage(file)
+  const { width, height } = calculateDimensions(img.width, img.height, MAX_DIMENSION)
 
   // Create canvas
-  const canvas = new OffscreenCanvas(width, height)
-  const ctx = canvas.getContext('2d')
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
 
+  const ctx = canvas.getContext('2d')
   if (!ctx) {
     throw new Error('Failed to get canvas context')
   }
 
-  // Draw image
-  ctx.drawImage(imageBitmap, 0, 0, width, height)
+  // Draw resized image
+  ctx.drawImage(img, 0, 0, width, height)
 
-  // Initial compression
-  let blob = await canvas.convertToBlob({
-    type: opts.format,
-    quality: opts.quality,
-  })
-
-  // If still too large, reduce quality iteratively
-  let quality = opts.quality
-  while (blob.size > TARGET_SIZE_BYTES && quality > 0.3) {
-    quality -= 0.1
-    blob = await canvas.convertToBlob({
-      type: opts.format,
-      quality,
-    })
+  // Try different quality levels to hit target size
+  let blob: Blob | null = null
+  for (const quality of QUALITY_STEPS) {
+    blob = await canvasToBlob(canvas, 'image/jpeg', quality)
+    if (blob.size <= targetSize) {
+      break
+    }
   }
 
-  // If still too large, reduce dimensions
-  if (blob.size > TARGET_SIZE_BYTES) {
-    return compressImage(file, {
-      ...opts,
-      maxWidth: Math.round(opts.maxWidth * 0.8),
-      maxHeight: Math.round(opts.maxHeight * 0.8),
-    })
+  if (!blob) {
+    throw new Error('Failed to compress image')
   }
 
-  return blob
+  return {
+    blob,
+    width,
+    height,
+    originalSize,
+    compressedSize: blob.size,
+    compressionRatio: originalSize / blob.size,
+  }
 }
 
-// ============================================================================
-// DIMENSION CALCULATION
-// ============================================================================
+/**
+ * Load image from file/blob
+ */
+function loadImage(file: File | Blob): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(img.src)
+      resolve(img)
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(img.src)
+      reject(new Error('Failed to load image'))
+    }
+    img.src = URL.createObjectURL(file)
+  })
+}
 
+/**
+ * Get image dimensions without fully loading
+ */
+function getImageDimensions(file: File | Blob): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(img.src)
+      resolve({ width: img.width, height: img.height })
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(img.src)
+      reject(new Error('Failed to get image dimensions'))
+    }
+    img.src = URL.createObjectURL(file)
+  })
+}
+
+/**
+ * Calculate new dimensions maintaining aspect ratio
+ */
 function calculateDimensions(
-  originalWidth: number,
-  originalHeight: number,
-  maxWidth: number,
-  maxHeight: number
+  width: number,
+  height: number,
+  maxDimension: number
 ): { width: number; height: number } {
-  let width = originalWidth
-  let height = originalHeight
-
-  // Scale down if exceeds max dimensions
-  if (width > maxWidth) {
-    height = Math.round((height * maxWidth) / width)
-    width = maxWidth
+  if (width <= maxDimension && height <= maxDimension) {
+    return { width, height }
   }
 
-  if (height > maxHeight) {
-    width = Math.round((width * maxHeight) / height)
-    height = maxHeight
+  const ratio = Math.min(maxDimension / width, maxDimension / height)
+  return {
+    width: Math.round(width * ratio),
+    height: Math.round(height * ratio),
   }
-
-  return { width, height }
 }
 
-// ============================================================================
-// THUMBNAIL GENERATION
-// ============================================================================
-
-export async function generateThumbnail(
-  file: File | Blob,
-  maxSize: number = 200
-): Promise<string> {
-  const imageBitmap = await createImageBitmap(file)
-
-  const { width, height } = calculateDimensions(
-    imageBitmap.width,
-    imageBitmap.height,
-    maxSize,
-    maxSize
-  )
-
-  const canvas = new OffscreenCanvas(width, height)
-  const ctx = canvas.getContext('2d')
-
-  if (!ctx) {
-    throw new Error('Failed to get canvas context')
-  }
-
-  ctx.drawImage(imageBitmap, 0, 0, width, height)
-
-  const blob = await canvas.convertToBlob({
-    type: 'image/jpeg',
-    quality: 0.6,
+/**
+ * Convert canvas to blob
+ */
+function canvasToBlob(
+  canvas: HTMLCanvasElement,
+  type: string,
+  quality: number
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) {
+          resolve(blob)
+        } else {
+          reject(new Error('Failed to create blob'))
+        }
+      },
+      type,
+      quality
+    )
   })
-
-  return blobToDataUrl(blob)
 }
 
-// ============================================================================
-// HELPERS
-// ============================================================================
-
-export function blobToDataUrl(blob: Blob): Promise<string> {
+/**
+ * Convert blob to base64
+ */
+export function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = reject
+    reader.onloadend = () => {
+      const result = reader.result
+      if (typeof result === 'string') {
+        resolve(result)
+      } else {
+        reject(new Error('Failed to convert to base64'))
+      }
+    }
+    reader.onerror = () => reject(reader.error)
     reader.readAsDataURL(blob)
   })
 }
 
-export function dataUrlToBlob(dataUrl: string): Blob {
-  const arr = dataUrl.split(',')
-  const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg'
-  const bstr = atob(arr[1])
-  let n = bstr.length
-  const u8arr = new Uint8Array(n)
+/**
+ * Convert base64 to blob
+ */
+export function base64ToBlob(base64: string, type: string = 'image/jpeg'): Blob {
+  const parts = base64.split(',')
+  const byteString = atob(parts[1] || parts[0])
+  const ab = new ArrayBuffer(byteString.length)
+  const ia = new Uint8Array(ab)
 
-  while (n--) {
-    u8arr[n] = bstr.charCodeAt(n)
+  for (let i = 0; i < byteString.length; i++) {
+    ia[i] = byteString.charCodeAt(i)
   }
 
-  return new Blob([u8arr], { type: mime })
+  return new Blob([ab], { type })
 }
 
-export function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+/**
+ * Get blob as ArrayBuffer
+ */
+export function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      if (reader.result instanceof ArrayBuffer) {
+        resolve(reader.result)
+      } else {
+        reject(new Error('Failed to read as ArrayBuffer'))
+      }
+    }
+    reader.onerror = () => reject(reader.error)
+    reader.readAsArrayBuffer(blob)
+  })
+}
+
+/**
+ * Estimate storage used by evidence items
+ */
+export function estimateStorageSize(items: Array<{ thumbnailData?: string; photoData?: string }>): number {
+  let totalBytes = 0
+
+  for (const item of items) {
+    if (item.thumbnailData) {
+      // Base64 is ~33% larger than binary
+      totalBytes += Math.ceil((item.thumbnailData.length * 3) / 4)
+    }
+    if (item.photoData) {
+      totalBytes += Math.ceil((item.photoData.length * 3) / 4)
+    }
+  }
+
+  return totalBytes
+}
+
+/**
+ * Format bytes to human readable
+ */
+export function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 Bytes'
+
+  const k = 1024
+  const sizes = ['Bytes', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
