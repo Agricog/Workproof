@@ -1,218 +1,206 @@
-/**
- * WorkProof Settings Page
- * User and app settings
- */
-
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Helmet } from 'react-helmet-async'
-import { useUser, useClerk } from '@clerk/clerk-react'
-import { useNavigate } from 'react-router-dom'
 import {
   User,
-  Building,
   Bell,
   Shield,
-  HelpCircle,
-  LogOut,
-  ChevronRight,
-  ExternalLink,
+  HardDrive,
   Trash2,
-  Cloud,
+  ExternalLink,
+  ChevronRight,
+  RefreshCw,
 } from 'lucide-react'
-import { clearSession } from '../hooks/useSessionTimeout'
-import { getStorageStats, clearSyncedEvidence } from '../utils/indexedDB'
-import { formatFileSize } from '../utils/compression'
-import type { OfflineStorageStats } from '../types/api'
+import { getStorageUsage, clearAllData } from '../utils/indexedDB'
+import { formatBytes } from '../utils/compression'
+import { forceSyncNow, getSyncStatus } from '../services/sync'
+
+interface SettingsLink {
+  icon: typeof User
+  label: string
+  description: string
+  action: () => void
+  external?: boolean
+}
 
 export default function Settings() {
-  const navigate = useNavigate()
-  const { user } = useUser()
-  const { signOut } = useClerk()
-
-  const [storageStats, setStorageStats] = useState<OfflineStorageStats | null>(null)
+  const [storageUsed, setStorageUsed] = useState(0)
+  const [storageQuota, setStorageQuota] = useState(0)
+  const [pendingSync, setPendingSync] = useState(0)
+  const [isSyncing, setIsSyncing] = useState(false)
   const [isClearing, setIsClearing] = useState(false)
 
-  useState(() => {
-    loadStorageStats()
-  })
+  useEffect(() => {
+    loadStorageInfo()
+    loadSyncStatus()
+  }, [])
 
-  const loadStorageStats = async () => {
-    const stats = await getStorageStats()
-    setStorageStats(stats)
+  const loadStorageInfo = async () => {
+    const { used, quota } = await getStorageUsage()
+    setStorageUsed(used)
+    setStorageQuota(quota)
   }
 
-  const handleSignOut = async () => {
-    clearSession()
-    await signOut()
-    navigate('/login')
+  const loadSyncStatus = async () => {
+    const status = await getSyncStatus()
+    setPendingSync(status.pendingEvidence + status.pendingQueue)
   }
 
-  const handleClearSynced = async () => {
-    if (!confirm('Clear all synced evidence from local storage? This won\'t delete anything from the cloud.')) {
+  const handleSync = async () => {
+    setIsSyncing(true)
+    try {
+      await forceSyncNow()
+      await loadSyncStatus()
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
+  const handleClearData = async () => {
+    if (!confirm('Are you sure you want to clear all local data? This cannot be undone.')) {
       return
     }
 
     setIsClearing(true)
     try {
-      const deleted = await clearSyncedEvidence()
-      alert(`Cleared ${deleted} synced items from local storage.`)
-      await loadStorageStats()
-    } catch (error) {
-      alert('Failed to clear storage.')
+      await clearAllData()
+      await loadStorageInfo()
+      await loadSyncStatus()
     } finally {
       setIsClearing(false)
     }
   }
 
-  const settingsSections = [
+  const accountSettings: SettingsLink[] = [
     {
-      title: 'Account',
-      items: [
-        {
-          icon: User,
-          label: 'Profile',
-          description: user?.primaryEmailAddress?.emailAddress || 'Manage your profile',
-          action: () => {
-            // TODO: Open profile editor
-          },
-        },
-        {
-          icon: Building,
-          label: 'Organisation',
-          description: 'Company details & NICEIC number',
-          action: () => {
-            // TODO: Open org settings
-          },
-        },
-      ],
+      icon: User,
+      label: 'Profile',
+      description: 'Manage your account details',
+      action: () => {},
     },
     {
-      title: 'App',
-      items: [
-        {
-          icon: Bell,
-          label: 'Notifications',
-          description: 'Sync alerts & reminders',
-          action: () => {
-            // TODO: Open notification settings
-          },
-        },
-        {
-          icon: Shield,
-          label: 'Privacy & Security',
-          description: 'Data handling & permissions',
-          action: () => {
-            // TODO: Open privacy settings
-          },
-        },
-      ],
+      icon: Bell,
+      label: 'Notifications',
+      description: 'Configure notification preferences',
+      action: () => {},
     },
     {
-      title: 'Support',
-      items: [
-        {
-          icon: HelpCircle,
-          label: 'Help Centre',
-          description: 'FAQs & documentation',
-          action: () => {
-            window.open('https://workproof.co.uk/help', '_blank')
-          },
-          external: true,
-        },
-      ],
+      icon: Shield,
+      label: 'Security',
+      description: 'Password and two-factor authentication',
+      action: () => {},
     },
   ]
 
+  const supportLinks: SettingsLink[] = [
+    {
+      icon: ExternalLink,
+      label: 'Help Centre',
+      description: 'Guides and FAQs',
+      action: () => window.open('https://help.workproof.co.uk', '_blank'),
+      external: true,
+    },
+    {
+      icon: ExternalLink,
+      label: 'Contact Support',
+      description: 'Get help from our team',
+      action: () => window.open('mailto:support@workproof.co.uk', '_blank'),
+      external: true,
+    },
+  ]
+
+  const storagePercent = storageQuota > 0 ? (storageUsed / storageQuota) * 100 : 0
+
   return (
-    <>
+    <div>
       <Helmet>
         <title>Settings | WorkProof</title>
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
 
-      <div className="animate-fade-in space-y-6">
-        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+      <div className="animate-fade-in">
+        <h1 className="text-2xl font-bold text-gray-900 mb-6">Settings</h1>
 
-        {/* User Card */}
-        <div className="card flex items-center gap-4">
-          <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center">
-            {user?.imageUrl ? (
-              <img
-                src={user.imageUrl}
-                alt={user.firstName || 'User'}
-                className="w-14 h-14 rounded-full object-cover"
-              />
-            ) : (
-              <User className="w-7 h-7 text-green-600" />
-            )}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-semibold text-gray-900 truncate">
-              {user?.firstName} {user?.lastName}
-            </p>
-            <p className="text-sm text-gray-500 truncate">
-              {user?.primaryEmailAddress?.emailAddress}
-            </p>
-          </div>
-        </div>
+        <div className="space-y-6">
+          <div className="card">
+            <h2 className="font-semibold text-gray-900 mb-4">Storage</h2>
 
-        {/* Storage Stats */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Cloud className="w-5 h-5 text-gray-400" />
-              <h3 className="font-medium text-gray-900">Local Storage</h3>
-            </div>
-            {storageStats && (
-              <span className="text-sm text-gray-500">
-                {formatFileSize(storageStats.totalSizeBytes)} used
-              </span>
-            )}
-          </div>
-
-          {storageStats && (
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Total items</span>
-                <span className="font-medium">{storageStats.totalItems}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Pending upload</span>
-                <span className="font-medium text-amber-600">
-                  {storageStats.pendingUploadCount}
+            <div className="mb-4">
+              <div className="flex items-center justify-between text-sm mb-2">
+                <span className="text-gray-600">Used</span>
+                <span className="font-medium text-gray-900">
+                  {formatBytes(storageUsed)} / {formatBytes(storageQuota)}
                 </span>
               </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full transition-all ${
+                    storagePercent > 80 ? 'bg-red-500' : 'bg-green-600'
+                  }`}
+                  style={{ width: `${Math.min(storagePercent, 100)}%` }}
+                ></div>
+              </div>
             </div>
-          )}
 
-          <button
-            onClick={handleClearSynced}
-            disabled={isClearing}
-            className="mt-4 w-full py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-          >
-            <Trash2 className="w-4 h-4" />
-            {isClearing ? 'Clearing...' : 'Clear synced evidence'}
-          </button>
-        </div>
+            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg mb-3">
+              <div>
+                <p className="font-medium text-gray-900">Pending Sync</p>
+                <p className="text-sm text-gray-500">
+                  {pendingSync} items waiting to sync
+                </p>
+              </div>
+              <button
+                onClick={handleSync}
+                disabled={isSyncing || pendingSync === 0}
+                className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className={`w-5 h-5 ${isSyncing ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
 
-        {/* Settings Sections */}
-        {settingsSections.map((section) => (
-          <div key={section.title}>
-            <h2 className="text-sm font-medium text-gray-500 mb-2 px-1">
-              {section.title}
-            </h2>
-            <div className="card divide-y divide-gray-100">
-              {section.items.map((item) => (
+            <button
+              onClick={handleClearData}
+              disabled={isClearing}
+              className="w-full flex items-center justify-center gap-2 p-3 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+            >
+              <Trash2 className="w-5 h-5" />
+              <span>{isClearing ? 'Clearing...' : 'Clear Local Data'}</span>
+            </button>
+          </div>
+
+          <div className="card">
+            <h2 className="font-semibold text-gray-900 mb-4">Account</h2>
+            <div className="space-y-1">
+              {accountSettings.map((item) => (
                 <button
                   key={item.label}
                   onClick={item.action}
-                  className="w-full py-3 flex items-center justify-between text-left hover:bg-gray-50 -mx-4 px-4 first:rounded-t-xl last:rounded-b-xl transition-colors"
+                  className="w-full flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg transition-colors"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
-                      <item.icon className="w-5 h-5 text-gray-600" />
+                    <item.icon className="w-5 h-5 text-gray-400" />
+                    <div className="text-left">
+                      <p className="font-medium text-gray-900">{item.label}</p>
+                      <p className="text-sm text-gray-500">{item.description}</p>
                     </div>
-                    <div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-gray-400" />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="card">
+            <h2 className="font-semibold text-gray-900 mb-4">Support</h2>
+            <div className="space-y-1">
+              {supportLinks.map((item) => (
+                <button
+                  key={item.label}
+                  onClick={item.action}
+                  className="w-full flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <item.icon className="w-5 h-5 text-gray-400" />
+                    <div className="text-left">
                       <p className="font-medium text-gray-900">{item.label}</p>
                       <p className="text-sm text-gray-500">{item.description}</p>
                     </div>
@@ -226,22 +214,13 @@ export default function Settings() {
               ))}
             </div>
           </div>
-        ))}
 
-        {/* Sign Out */}
-        <button
-          onClick={handleSignOut}
-          className="w-full py-3 text-red-600 font-medium hover:bg-red-50 rounded-lg transition-colors flex items-center justify-center gap-2"
-        >
-          <LogOut className="w-5 h-5" />
-          Sign Out
-        </button>
-
-        {/* Version */}
-        <p className="text-center text-xs text-gray-400">
-          WorkProof v1.0.0 • Built with ❤️ for UK electricians
-        </p>
+          <div className="text-center text-sm text-gray-500 py-4">
+            <p>WorkProof v1.0.0</p>
+            <p className="mt-1">© 2026 WorkProof. All rights reserved.</p>
+          </div>
+        </div>
       </div>
-    </>
+    </div>
   )
 }
