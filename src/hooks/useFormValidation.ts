@@ -8,7 +8,7 @@ import { useState, useCallback } from 'react'
 import { validateInput, type ValidationResult } from '../utils/validation'
 import { sanitizeInput } from '../utils/sanitization'
 
-type FieldType = 'email' | 'number' | 'text' | 'currency' | 'phone' | 'postcode'
+type FieldType = 'email' | 'numeric' | 'text' | 'currency' | 'phone' | 'postcode' | 'alphanumeric'
 
 interface FieldConfig {
   type: FieldType
@@ -76,12 +76,13 @@ export function useFormValidation<T extends Record<string, string>>(
         return `Minimum ${fieldConfig.minLength} characters required`
       }
 
+      // Map field type to validation type
+      const validationType = fieldConfig.type === 'number' ? 'numeric' : fieldConfig.type
+
       // Use validateInput for type-specific validation
       const result: ValidationResult = validateInput(
         value,
-        fieldConfig.type === 'phone' || fieldConfig.type === 'postcode' 
-          ? 'text' 
-          : fieldConfig.type,
+        validationType,
         fieldConfig.maxLength || 255
       )
 
@@ -136,7 +137,7 @@ export function useFormValidation<T extends Record<string, string>>(
         const isValid = Object.values(newErrors).every((e) => !e) &&
           Object.keys(config).every((key) => {
             const cfg = config[key]
-            if (cfg.required) {
+            if (cfg && cfg.required) {
               return !!newValues[key as keyof T]?.trim()
             }
             return true
