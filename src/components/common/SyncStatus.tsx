@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
-import { Cloud, CloudOff, RefreshCw } from 'lucide-react'
+import { useState } from 'react'
+import { CloudOff, RefreshCw } from 'lucide-react'
 import { useOffline } from '../../hooks/useOffline'
 
 export default function SyncStatus() {
-  const { isOnline, pendingSync, triggerSync } = useOffline()
+  const { isOnline, pendingCount, triggerSync } = useOffline()
   const [isSyncing, setIsSyncing] = useState(false)
 
   const handleSync = async () => {
@@ -11,13 +11,13 @@ export default function SyncStatus() {
     
     setIsSyncing(true)
     try {
-      await triggerSync()
+      triggerSync()
     } finally {
       setTimeout(() => setIsSyncing(false), 1000)
     }
   }
 
-  if (isOnline && pendingSync === 0) {
+  if (isOnline && pendingCount === 0) {
     return null
   }
 
@@ -42,7 +42,7 @@ export default function SyncStatus() {
       )}
       <span>
         {isOnline 
-          ? `${pendingSync} pending` 
+          ? `${pendingCount} pending` 
           : 'Offline'
         }
       </span>
