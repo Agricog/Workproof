@@ -9,12 +9,18 @@ import {
   getStorageStats,
   isStorageNearLimit,
 } from '../utils/indexedDB'
-import type { OfflineStorageStats } from '../types/api'
+
+interface StorageStats {
+  used: number
+  quota: number
+  percentage: number
+  pendingCount: number
+}
 
 interface UseOfflineReturn {
   isOnline: boolean
   pendingCount: number
-  storageStats: OfflineStorageStats | null
+  storageStats: StorageStats | null
   isStorageWarning: boolean
   triggerSync: () => void
   refreshStats: () => Promise<void>
@@ -23,8 +29,19 @@ interface UseOfflineReturn {
 export function useOffline(): UseOfflineReturn {
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [pendingCount, setPendingCount] = useState(0)
-  const [storageStats, setStorageStats] = useState<OfflineStorageStats | null>(null)
+  const [storageStats, setStorageStats] = useState<StorageStats | null>(null)
   const [isStorageWarning, setIsStorageWarning] = useState(false)
+
+  const triggerSync = useCallback(() => {
+    if ('serviceWorker' in navigator && 'sync' in ServiceWorkerRegistration.prototype) {
+      navigator.serviceWorker.ready.then((registration) => {
+        // @ts-expect-error - sync is not in standard types yet
+        registration.sync.register('sync-evidence')
+      })
+    }
+    // Also dispatch custom event for manual sync handling
+    window.dispatchEvent(new CustomEvent('workproof:sync'))
+  }, [])
 
   // Update online status
   useEffect(() => {
@@ -32,7 +49,6 @@ export function useOffline(): UseOfflineReturn {
       setIsOnline(true)
       triggerSync()
     }
-
     const handleOffline = () => {
       setIsOnline(false)
     }
@@ -44,15 +60,7 @@ export function useOffline(): UseOfflineReturn {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
     }
-  }, [])
-
-  // Refresh stats on mount and periodically
-  useEffect(() => {
-    refreshStats()
-
-    const interval = setInterval(refreshStats, 30000) // Every 30 seconds
-    return () => clearInterval(interval)
-  }, [])
+  }, [triggerSync])
 
   const refreshStats = useCallback(async () => {
     try {
@@ -69,17 +77,12 @@ export function useOffline(): UseOfflineReturn {
     }
   }, [])
 
-  const triggerSync = useCallback(() => {
-    if ('serviceWorker' in navigator && 'sync' in ServiceWorkerRegistration.prototype) {
-      navigator.serviceWorker.ready.then((registration) => {
-        // @ts-expect-error - sync is not in standard types yet
-        registration.sync.register('sync-evidence')
-      })
-    }
-
-    // Also dispatch custom event for manual sync handling
-    window.dispatchEvent(new CustomEvent('workproof:sync'))
-  }, [])
+  // Refresh stats on mount and periodically
+  useEffect(() => {
+    refreshStats()
+    const interval = setInterval(refreshStats, 30000) // Every 30 seconds
+    return () => clearInterval(interval)
+  }, [refreshStats])
 
   return {
     isOnline,
