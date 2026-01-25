@@ -10,7 +10,6 @@ import {
   ArrowLeft,
   MapPin,
   Calendar,
-  User,
   ChevronRight,
   MoreVertical,
   CheckCircle,
@@ -46,8 +45,7 @@ export default function JobDetail() {
   const loadJobData = async () => {
     setIsLoading(true)
     try {
-      // TODO: Fetch from API
-      // Placeholder data
+      // TODO: Fetch from API - Placeholder data
       setJob({
         id: jobId || '1',
         orgId: '1',
@@ -87,13 +85,10 @@ export default function JobDetail() {
     if (!confirm('Are you sure you want to delete this job? This cannot be undone.')) {
       return
     }
-
-    // TODO: Delete via API
     navigate('/jobs')
   }
 
   const handleArchiveJob = async () => {
-    // TODO: Archive via API
     setShowMenu(false)
   }
 
@@ -157,10 +152,7 @@ export default function JobDetail() {
                 />
                 <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
                   <button
-                    onClick={() => {
-                      setShowMenu(false)
-                      // TODO: Edit job
-                    }}
+                    onClick={() => setShowMenu(false)}
                     className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
                   >
                     <Edit className="w-4 h-4" />
@@ -289,24 +281,3 @@ export default function JobDetail() {
     </>
   )
 }
-```
-
----
-
-## Summary - Batch 6
-
-| # | File | Purpose |
-|---|------|---------|
-| 1 | `src/pages/Landing.tsx` | Public marketing page with full SEO |
-| 2 | `src/pages/Login.tsx` | Clerk authentication page |
-| 3 | `src/pages/Dashboard.tsx` | Main dashboard with stats + recent jobs |
-| 4 | `src/pages/Jobs.tsx` | Jobs list with search + filter |
-| 5 | `src/pages/NewJob.tsx` | Create job form with validation |
-| 6 | `src/pages/JobDetail.tsx` | Job view with tasks |
-
-**Create this folder:**
-- `src/pages/`
-
-**Note:** You need to install `react-helmet-async`:
-```
-npm install react-helmet-async
