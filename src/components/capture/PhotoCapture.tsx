@@ -8,7 +8,7 @@ import { Camera, X, RotateCcw, Check, MapPin, Clock, AlertCircle } from 'lucide-
 import { useCamera } from '../../hooks/useCamera'
 import { useGeolocation, formatCoordinates } from '../../hooks/useGeolocation'
 import { compressImage, generateThumbnail, blobToBase64 } from '../../utils/compression'
-import { generateEvidenceHash, getDeviceId, generateId } from '../../utils/crypto'
+import { generateEvidenceHash, generateId } from '../../utils/crypto'
 import { saveEvidence, isStorageNearLimit } from '../../utils/indexedDB'
 import { captureError } from '../../utils/errorTracking'
 import type { EvidenceType } from '../../types/models'
@@ -109,7 +109,6 @@ export default function PhotoCapture({
 
     try {
       const capturedAt = new Date().toISOString()
-      const deviceId = getDeviceId()
 
       // Generate immutable hash
       const hash = await generateEvidenceHash(capturedBlob, capturedAt, workerId)
