@@ -1,15 +1,13 @@
 /**
  * WorkProof Error Tracking
- * Sentry integration for production error monitoring
- * Filters sensitive data before sending
+ * Sentry integration with PII filtering
  */
 
 import * as Sentry from '@sentry/react'
 
-// ============================================================================
-// INITIALIZATION
-// ============================================================================
-
+/**
+ * Initialize Sentry error tracking
+ */
 export function initializeSentry(): void {
   const dsn = import.meta.env.VITE_SENTRY_DSN
 
@@ -21,140 +19,154 @@ export function initializeSentry(): void {
   Sentry.init({
     dsn,
     environment: import.meta.env.MODE,
+    enabled: import.meta.env.PROD,
+
+    // Sample rates
     tracesSampleRate: import.meta.env.PROD ? 0.1 : 1.0,
     replaysSessionSampleRate: 0.1,
     replaysOnErrorSampleRate: 1.0,
+
+    // Integrations
     integrations: [
+      Sentry.browserTracingIntegration(),
       Sentry.replayIntegration({
         maskAllText: true,
         blockAllMedia: true,
       }),
     ],
+
+    // Filter sensitive data
     beforeSend(event) {
-      // Filter sensitive data
+      // Remove sensitive headers
       if (event.request?.headers) {
         delete event.request.headers['Authorization']
         delete event.request.headers['X-CSRF-Token']
         delete event.request.headers['Cookie']
       }
 
-      // Redact user data
+      // Remove user PII
       if (event.user) {
         delete event.user.email
         delete event.user.ip_address
       }
 
-      // Filter breadcrumbs
-      if (event.breadcrumbs) {
-        event.breadcrumbs = event.breadcrumbs.map((crumb) => {
-          if (crumb.data?.url) {
-            crumb.data.url = redactUrl(crumb.data.url)
-          }
-          return crumb
-        })
+      // Redact URLs with sensitive params
+      if (event.request?.url) {
+        event.request.url = redactUrl(event.request.url)
       }
 
       return event
     },
+
+    // Filter breadcrumbs
+    beforeBreadcrumb(breadcrumb) {
+      // Redact sensitive URLs in breadcrumbs
+      if (breadcrumb.data?.url) {
+        breadcrumb.data.url = redactUrl(breadcrumb.data.url)
+      }
+      return breadcrumb
+    },
   })
 }
 
-// ============================================================================
-// ERROR CAPTURE
-// ============================================================================
+/**
+ * Redact sensitive query parameters from URLs
+ */
+function redactUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    const sensitiveParams = ['token', 'key', 'password', 'secret', 'auth']
 
+    sensitiveParams.forEach((param) => {
+      if (parsed.searchParams.has(param)) {
+        parsed.searchParams.set(param, '[REDACTED]')
+      }
+    })
+
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
+
+/**
+ * Capture a general error
+ */
 export function captureError(
   error: unknown,
-  context: string,
-  extras?: Record<string, unknown>
+  context?: string,
+  extra?: Record<string, unknown>
 ): void {
-  console.error(`[${context}]`, error)
+  console.error(`[${context || 'Error'}]`, error)
 
   Sentry.captureException(error, {
     tags: {
-      context,
-      type: 'application_error',
+      context: context || 'unknown',
     },
-    extra: {
-      ...extras,
-      timestamp: new Date().toISOString(),
-    },
+    extra,
   })
 }
 
+/**
+ * Capture a calculator/form error
+ */
 export function captureCalculatorError(error: unknown, context: string): void {
-  captureError(error, context, { category: 'calculator' })
+  captureError(error, `calculator:${context}`, {
+    type: 'calculator_error',
+  })
 }
 
+/**
+ * Capture a sync error
+ */
 export function captureSyncError(
   error: unknown,
-  entityType: string,
-  entityId: string
+  context: string,
+  itemCount?: number
 ): void {
-  captureError(error, 'sync_error', {
-    category: 'sync',
-    entityType,
-    entityId,
+  captureError(error, `sync:${context}`, {
+    type: 'sync_error',
+    itemCount,
   })
 }
 
-export function captureUploadError(error: unknown, fileType: string): void {
-  captureError(error, 'upload_error', {
-    category: 'upload',
-    fileType,
+/**
+ * Capture an upload error
+ */
+export function captureUploadError(
+  error: unknown,
+  context: string,
+  fileSize?: number
+): void {
+  captureError(error, `upload:${context}`, {
+    type: 'upload_error',
+    fileSize,
   })
 }
 
-// ============================================================================
-// USER CONTEXT
-// ============================================================================
-
-export function setUserContext(userId: string, orgId: string): void {
+/**
+ * Set user context for error tracking
+ */
+export function setUserContext(userId: string, orgId?: string): void {
   Sentry.setUser({
     id: userId,
-    // Don't include email or other PII
   })
 
-  Sentry.setTag('org_id', orgId)
+  if (orgId) {
+    Sentry.setTag('org_id', orgId)
+  }
 }
 
+/**
+ * Clear user context on logout
+ */
 export function clearUserContext(): void {
   Sentry.setUser(null)
 }
 
-// ============================================================================
-// PERFORMANCE MONITORING
-// ============================================================================
-
-export function startTransaction(
-  name: string,
-  operation: string
-): Sentry.Span | undefined {
-  return Sentry.startInactiveSpan({
-    name,
-    op: operation,
-  })
-}
-
-// ============================================================================
-// HELPERS
-// ============================================================================
-
-function redactUrl(url: string): string {
-  try {
-    const parsed = new URL(url)
-    // Remove query params that might contain sensitive data
-    parsed.search = ''
-    return parsed.toString()
-  } catch {
-    return '[redacted-url]'
-  }
-}
-
-// ============================================================================
-// ERROR BOUNDARY FALLBACK
-// ============================================================================
-
+/**
+ * Error Fallback Component
+ */
 export function ErrorFallback({
   error,
   resetErrorBoundary,
@@ -164,7 +176,7 @@ export function ErrorFallback({
 }): JSX.Element {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-6 text-center">
+      <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-6 text-center">
         <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
           <svg
             className="w-8 h-8 text-red-600"
@@ -180,15 +192,15 @@ export function ErrorFallback({
             />
           </svg>
         </div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">
+        <h2 className="text-xl font-bold text-gray-900 mb-2">
           Something went wrong
         </h2>
-        <p className="text-gray-600 mb-4">
-          We've been notified and are working on a fix.
+        <p className="text-gray-600 mb-4 text-sm">
+          {error.message || 'An unexpected error occurred'}
         </p>
         <button
           onClick={resetErrorBoundary}
-          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+          className="w-full py-2.5 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors"
         >
           Try again
         </button>
