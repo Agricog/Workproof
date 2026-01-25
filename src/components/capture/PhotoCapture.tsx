@@ -11,6 +11,7 @@ import { compressImage, generateThumbnail, blobToBase64 } from '../../utils/comp
 import { generateEvidenceHash, generateId } from '../../utils/crypto'
 import { saveEvidence, isStorageNearLimit } from '../../utils/indexedDB'
 import { captureError } from '../../utils/errorTracking'
+import { trackEvidenceCaptured } from '../../utils/analytics'
 import type { EvidenceType } from '../../types/models'
 import type { StoredEvidence } from '../../utils/indexedDB'
 
@@ -137,6 +138,9 @@ export default function PhotoCapture({
 
       // Save to IndexedDB
       await saveEvidence(evidence)
+
+      // Track analytics
+      trackEvidenceCaptured(evidenceType, location !== null)
 
       // Trigger sync if online
       if (navigator.onLine) {
