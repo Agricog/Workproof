@@ -44,8 +44,8 @@ export default function Dashboard() {
       // For now, use placeholder data
       setStats({
         activeJobs: 3,
-        evidenceThisMonth: storageStats.totalItems || 12,
-        pendingSync: storageStats.pendingUploadCount || 0,
+        evidenceThisMonth: storageStats.pendingCount || 12,
+        pendingSync: storageStats.pendingCount || 0,
       })
 
       // Placeholder recent jobs
@@ -109,7 +109,7 @@ export default function Dashboard() {
         </div>
 
         {/* Sync Status */}
-        <SyncStatus variant="full" />
+        <SyncStatus />
 
         {/* Quick Stats */}
         <div className="grid grid-cols-3 gap-3">
