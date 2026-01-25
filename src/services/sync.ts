@@ -1,266 +1,294 @@
 /**
  * WorkProof Sync Service
- * Background sync for offline evidence uploads
+ * Background sync for offline evidence
  */
 
-import {
-  getPendingEvidence,
-  updateEvidenceStatus,
-  deleteEvidence,
-  getStorageStats,
+import { 
+  getSyncQueue, 
+  removeFromSyncQueue, 
+  updateSyncAttempt,
+  getUnsyncedEvidence,
+  markEvidenceSynced,
+  type SyncQueueItem 
 } from '../utils/indexedDB'
-import { api, isApiError } from './api'
+import { evidenceApi } from './api'
 import { captureError, captureSyncError } from '../utils/errorTracking'
-import type { OfflineEvidenceItem, SyncResult } from '../types/api'
 
-// ============================================================================
-// CONFIGURATION
-// ============================================================================
+const MAX_RETRY_ATTEMPTS = 5
+const SYNC_INTERVAL_MS = 60 * 1000 // 1 minute
 
-const MAX_RETRIES = 3
-const RETRY_DELAY_MS = 5000
-const BATCH_SIZE = 5
+let syncInProgress = false
+let syncIntervalId: ReturnType<typeof setInterval> | null = null
 
-// ============================================================================
-// SYNC SERVICE
-// ============================================================================
-
-class SyncService {
-  private isSyncing = false
-  private syncListeners: Set<(state: SyncState) => void> = new Set()
-
-  // Subscribe to sync state changes
-  subscribe(listener: (state: SyncState) => void): () => void {
-    this.syncListeners.add(listener)
-    return () => this.syncListeners.delete(listener)
+/**
+ * Start the background sync service
+ */
+export function startSyncService(): void {
+  if (syncIntervalId) {
+    return // Already running
   }
 
-  private notifyListeners(state: SyncState): void {
-    this.syncListeners.forEach((listener) => listener(state))
+  // Initial sync
+  triggerSync()
+
+  // Set up interval
+  syncIntervalId = setInterval(() => {
+    if (navigator.onLine) {
+      triggerSync()
+    }
+  }, SYNC_INTERVAL_MS)
+
+  // Listen for online events
+  window.addEventListener('online', handleOnline)
+}
+
+/**
+ * Stop the background sync service
+ */
+export function stopSyncService(): void {
+  if (syncIntervalId) {
+    clearInterval(syncIntervalId)
+    syncIntervalId = null
+  }
+  window.removeEventListener('online', handleOnline)
+}
+
+/**
+ * Handle coming back online
+ */
+function handleOnline(): void {
+  console.log('Back online - triggering sync')
+  triggerSync()
+}
+
+/**
+ * Trigger a sync cycle
+ */
+export async function triggerSync(): Promise<void> {
+  if (syncInProgress || !navigator.onLine) {
+    return
   }
 
-  // Main sync function
-  async sync(): Promise<SyncResult> {
-    if (this.isSyncing) {
-      return {
-        success: false,
-        syncedCount: 0,
-        failedCount: 0,
-        errors: [{ itemId: '', error: 'Sync already in progress' }],
-      }
-    }
+  syncInProgress = true
 
-    if (!navigator.onLine) {
-      return {
-        success: false,
-        syncedCount: 0,
-        failedCount: 0,
-        errors: [{ itemId: '', error: 'No internet connection' }],
-      }
-    }
+  try {
+    // Sync evidence first
+    await syncEvidence()
 
-    this.isSyncing = true
-    this.notifyListeners({ isSyncing: true, progress: 0 })
+    // Then process sync queue
+    await processSyncQueue()
+  } catch (error) {
+    captureSyncError(error, 'triggerSync')
+  } finally {
+    syncInProgress = false
+  }
+}
 
-    const result: SyncResult = {
-      success: true,
-      syncedCount: 0,
-      failedCount: 0,
-      errors: [],
-    }
+/**
+ * Sync unsynced evidence to server
+ */
+async function syncEvidence(): Promise<void> {
+  const unsyncedItems = await getUnsyncedEvidence()
 
+  if (unsyncedItems.length === 0) {
+    return
+  }
+
+  console.log(`Syncing ${unsyncedItems.length} evidence items`)
+
+  for (const item of unsyncedItems) {
+    if (!item) continue
+    
     try {
-      const pending = await getPendingEvidence()
-
-      if (pending.length === 0) {
-        return result
-      }
-
-      // Process in batches
-      for (let i = 0; i < pending.length; i += BATCH_SIZE) {
-        const batch = pending.slice(i, i + BATCH_SIZE)
-        const batchResults = await Promise.allSettled(
-          batch.map((item) => this.uploadEvidence(item))
-        )
-
-        batchResults.forEach((batchResult, index) => {
-          const item = batch[index]
-
-          if (batchResult.status === 'fulfilled' && batchResult.value) {
-            result.syncedCount++
-          } else {
-            result.failedCount++
-            result.errors.push({
-              itemId: item.id,
-              error:
-                batchResult.status === 'rejected'
-                  ? batchResult.reason?.message || 'Unknown error'
-                  : 'Upload failed',
-            })
-          }
-        })
-
-        // Update progress
-        const progress = Math.round(((i + BATCH_SIZE) / pending.length) * 100)
-        this.notifyListeners({ isSyncing: true, progress: Math.min(progress, 100) })
-      }
-
-      result.success = result.failedCount === 0
-    } catch (error) {
-      captureError(error, 'SyncService.sync')
-      result.success = false
-      result.errors.push({ itemId: '', error: 'Sync failed unexpectedly' })
-    } finally {
-      this.isSyncing = false
-      this.notifyListeners({ isSyncing: false, progress: 100 })
-    }
-
-    return result
-  }
-
-  // Upload single evidence item
-  private async uploadEvidence(item: OfflineEvidenceItem): Promise<boolean> {
-    // Skip if max retries exceeded
-    if (item.retryCount >= MAX_RETRIES) {
-      await updateEvidenceStatus(item.id, 'failed', 'Max retries exceeded')
-      return false
-    }
-
-    try {
-      await updateEvidenceStatus(item.id, 'uploading')
-
-      // Convert blob to base64 for upload
-      const base64 = await blobToBase64(item.photoBlob)
-
-      const response = await api.post('/evidence/upload', {
-        id: item.id,
-        taskId: item.taskId,
+      const response = await evidenceApi.upload(item.taskId, {
         evidenceType: item.evidenceType,
-        photo: base64,
-        photoBytesHash: item.photoBytesHash,
+        photoData: item.photoData,
+        thumbnailData: item.thumbnailData,
+        hash: item.hash,
         capturedAt: item.capturedAt,
-        capturedLat: item.capturedLat,
-        capturedLng: item.capturedLng,
-        workerId: item.workerId,
-        deviceId: item.deviceId,
+        latitude: item.latitude,
+        longitude: item.longitude,
+        accuracy: item.accuracy,
       })
 
-      if (isApiError(response)) {
-        throw new Error(response.error.message)
+      if (response.data) {
+        await markEvidenceSynced(item.id)
+        console.log(`Evidence ${item.id} synced successfully`)
+      } else {
+        console.error(`Failed to sync evidence ${item.id}:`, response.error)
       }
-
-      // Success - mark as synced and optionally delete local copy
-      await updateEvidenceStatus(item.id, 'synced')
-
-      // Clean up local storage after successful sync
-      const stats = await getStorageStats()
-      if (stats.totalSizeBytes > 30 * 1024 * 1024) {
-        // If over 30MB, delete synced items
-        await deleteEvidence(item.id)
-      }
-
-      return true
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Upload failed'
-      await updateEvidenceStatus(item.id, 'pending', errorMessage)
-      captureSyncError(error, 'evidence', item.id)
+      captureSyncError(error, 'syncEvidence')
+    }
+  }
+}
+
+/**
+ * Process items in the sync queue
+ */
+async function processSyncQueue(): Promise<void> {
+  const queue = await getSyncQueue()
+
+  if (queue.length === 0) {
+    return
+  }
+
+  console.log(`Processing ${queue.length} sync queue items`)
+
+  for (const item of queue) {
+    if (!item) continue
+    
+    if (item.attempts >= MAX_RETRY_ATTEMPTS) {
+      console.warn(`Max retries exceeded for sync item ${item.id}`)
+      continue
+    }
+
+    try {
+      const success = await processSyncItem(item)
+
+      if (success) {
+        await removeFromSyncQueue(item.id)
+        console.log(`Sync item ${item.id} processed successfully`)
+      } else {
+        await updateSyncAttempt(item.id)
+      }
+    } catch (error) {
+      captureSyncError(error, 'processSyncQueue')
+      await updateSyncAttempt(item.id)
+    }
+  }
+}
+
+/**
+ * Process a single sync queue item
+ */
+async function processSyncItem(item: SyncQueueItem): Promise<boolean> {
+  switch (item.type) {
+    case 'evidence':
+      return processEvidenceSync(item)
+    case 'job':
+      return processJobSync(item)
+    case 'task':
+      return processTaskSync(item)
+    default:
+      console.warn(`Unknown sync item type: ${item.type}`)
       return false
-    }
-  }
-
-  // Retry failed uploads
-  async retryFailed(): Promise<SyncResult> {
-    const pending = await getPendingEvidence()
-    const failed = pending.filter(
-      (item) => item.syncStatus === 'failed' || item.retryCount > 0
-    )
-
-    // Reset retry counts
-    for (const item of failed) {
-      item.retryCount = 0
-      await updateEvidenceStatus(item.id, 'pending')
-    }
-
-    return this.sync()
-  }
-
-  // Get sync status
-  async getStatus(): Promise<SyncStatus> {
-    const stats = await getStorageStats()
-
-    return {
-      pendingCount: stats.pendingUploadCount,
-      totalItems: stats.totalItems,
-      totalSizeBytes: stats.totalSizeBytes,
-      isSyncing: this.isSyncing,
-    }
   }
 }
 
-// ============================================================================
-// TYPES
-// ============================================================================
+/**
+ * Process evidence sync item
+ */
+async function processEvidenceSync(item: SyncQueueItem): Promise<boolean> {
+  const data = item.data as {
+    taskId: string
+    evidenceType: string
+    photoData: string
+    thumbnailData: string
+    hash: string
+    capturedAt: string
+    latitude: number | null
+    longitude: number | null
+    accuracy: number | null
+  }
 
-interface SyncState {
+  const response = await evidenceApi.upload(data.taskId, {
+    evidenceType: data.evidenceType,
+    photoData: data.photoData,
+    thumbnailData: data.thumbnailData,
+    hash: data.hash,
+    capturedAt: data.capturedAt,
+    latitude: data.latitude,
+    longitude: data.longitude,
+    accuracy: data.accuracy,
+  })
+
+  return !!response.data
+}
+
+/**
+ * Process job sync item
+ */
+async function processJobSync(item: SyncQueueItem): Promise<boolean> {
+  // TODO: Implement job sync when backend is ready
+  console.log('Job sync not yet implemented', item)
+  return true
+}
+
+/**
+ * Process task sync item
+ */
+async function processTaskSync(item: SyncQueueItem): Promise<boolean> {
+  // TODO: Implement task sync when backend is ready
+  console.log('Task sync not yet implemented', item)
+  return true
+}
+
+/**
+ * Get sync status
+ */
+export async function getSyncStatus(): Promise<{
+  pendingEvidence: number
+  pendingQueue: number
+  isOnline: boolean
   isSyncing: boolean
-  progress: number
+}> {
+  const unsyncedEvidence = await getUnsyncedEvidence()
+  const queue = await getSyncQueue()
+
+  return {
+    pendingEvidence: unsyncedEvidence.length,
+    pendingQueue: queue.length,
+    isOnline: navigator.onLine,
+    isSyncing: syncInProgress,
+  }
 }
 
-interface SyncStatus {
-  pendingCount: number
-  totalItems: number
-  totalSizeBytes: number
-  isSyncing: boolean
-}
+/**
+ * Force sync now (for manual trigger)
+ */
+export async function forceSyncNow(): Promise<{ success: boolean; synced: number; failed: number }> {
+  if (!navigator.onLine) {
+    return { success: false, synced: 0, failed: 0 }
+  }
 
-// ============================================================================
-// HELPERS
-// ============================================================================
+  let synced = 0
+  let failed = 0
 
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = reader.result as string
-      // Remove data URL prefix
-      const base64 = result.split(',')[1]
-      resolve(base64)
+  syncInProgress = true
+
+  try {
+    const unsyncedItems = await getUnsyncedEvidence()
+
+    for (const item of unsyncedItems) {
+      if (!item) continue
+      
+      try {
+        const response = await evidenceApi.upload(item.taskId, {
+          evidenceType: item.evidenceType,
+          photoData: item.photoData,
+          thumbnailData: item.thumbnailData,
+          hash: item.hash,
+          capturedAt: item.capturedAt,
+          latitude: item.latitude,
+          longitude: item.longitude,
+          accuracy: item.accuracy,
+        })
+
+        if (response.data) {
+          await markEvidenceSynced(item.id)
+          synced++
+        } else {
+          failed++
+        }
+      } catch (error) {
+        failed++
+        captureSyncError(error, 'forceSyncNow')
+      }
     }
-    reader.onerror = reject
-    reader.readAsDataURL(blob)
-  })
-}
 
-// ============================================================================
-// SINGLETON EXPORT
-// ============================================================================
-
-export const syncService = new SyncService()
-
-// ============================================================================
-// AUTO SYNC SETUP
-// ============================================================================
-
-export function setupAutoSync(): void {
-  // Sync when coming online
-  window.addEventListener('online', () => {
-    setTimeout(() => syncService.sync(), 1000)
-  })
-
-  // Listen for custom sync events
-  window.addEventListener('workproof:sync', () => {
-    syncService.sync()
-  })
-
-  // Periodic sync every 60 seconds when online
-  setInterval(() => {
-    if (navigator.onLine) {
-      syncService.sync()
-    }
-  }, 60000)
-
-  // Initial sync if online
-  if (navigator.onLine) {
-    setTimeout(() => syncService.sync(), 3000)
+    return { success: true, synced, failed }
+  } finally {
+    syncInProgress = false
   }
 }
