@@ -34,7 +34,9 @@ if (container) {
       null,
       React.createElement(
         Sentry.ErrorBoundary,
-        { fallback: ErrorFallback },
+        { 
+          fallback: (props) => React.createElement(ErrorFallback, props)
+        },
         React.createElement(
           HelmetProvider,
           null,
