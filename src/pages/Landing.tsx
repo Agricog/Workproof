@@ -33,10 +33,12 @@ import {
   CheckCircle,
   ArrowRight,
   ChevronDown,
+  ChevronUp,
   Star,
-  BadgeCheck,
-  WifiOff,
-  Building2,
+  CloudOff,
+  FileText,
+  Download,
+  Quote,
 } from 'lucide-react'
 import { useState } from 'react'
 
