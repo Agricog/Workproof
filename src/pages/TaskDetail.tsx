@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
-import { ArrowLeft, Camera, CheckCircle, Clock } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { getTaskTypeConfig } from '../types/taskConfigs'
-import type { Task, TaskStatus } from '../types/models'
+import type { Task, TaskStatus, EvidenceType, StoredEvidence } from '../types/models'
 import PhotoCapture from '../components/capture/PhotoCapture'
 import EvidenceChecklist from '../components/capture/EvidenceChecklist'
 
@@ -21,7 +21,7 @@ export default function TaskDetail() {
   const [task, setTask] = useState<Task | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [showCamera, setShowCamera] = useState(false)
-  const [selectedEvidenceType, setSelectedEvidenceType] = useState<string | null>(null)
+  const [selectedEvidenceType, setSelectedEvidenceType] = useState<EvidenceType | null>(null)
   const [capturedEvidence, setCapturedEvidence] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
@@ -53,15 +53,15 @@ export default function TaskDetail() {
   }
 
   const handleCaptureStart = (evidenceType: string) => {
-    setSelectedEvidenceType(evidenceType)
+    setSelectedEvidenceType(evidenceType as EvidenceType)
     setShowCamera(true)
   }
 
-  const handleCaptureComplete = (_photoData: string, _hash: string) => {
-    if (selectedEvidenceType) {
+  const handleCaptureComplete = (evidence: StoredEvidence) => {
+    if (evidence.evidenceType) {
       setCapturedEvidence((prev) => ({
         ...prev,
-        [selectedEvidenceType]: true,
+        [evidence.evidenceType]: true,
       }))
     }
     setShowCamera(false)
