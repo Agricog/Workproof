@@ -5,14 +5,13 @@
 
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { HelmetProvider } from 'react-helmet-async'
 import * as Sentry from '@sentry/react'
 import App from './App'
 import { initializeSentry, ErrorFallback } from './utils/errorTracking'
 import { initDB } from './utils/indexedDB'
 import { setupAutoSync } from './services/sync'
 import './index.css'
-import { HelmetProvider } from 'react-helmet-async'
-// Then wrap: <HelmetProvider><App /></HelmetProvider>
 
 // Initialize Sentry
 initializeSentry()
@@ -79,8 +78,10 @@ const root = createRoot(container)
 
 root.render(
   <StrictMode>
-    <Sentry.ErrorBoundary fallback={ErrorFallback} showDialog>
-      <App />
-    </Sentry.ErrorBoundary>
+    <HelmetProvider>
+      <Sentry.ErrorBoundary fallback={ErrorFallback} showDialog>
+        <App />
+      </Sentry.ErrorBoundary>
+    </HelmetProvider>
   </StrictMode>
 )
