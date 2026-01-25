@@ -77,8 +77,7 @@ export function useFormValidation<T extends Record<string, string>>(
       }
 
       // Map field type to validation type
-      const validationType = fieldConfig.type === 'number' ? 'numeric' : fieldConfig.type
-
+      const validationType = fieldConfig.type
       // Use validateInput for type-specific validation
       const result: ValidationResult = validateInput(
         value,
@@ -106,7 +105,7 @@ export function useFormValidation<T extends Record<string, string>>(
       }
 
       // Number range checks
-      if (fieldConfig.type === 'number' || fieldConfig.type === 'currency') {
+      if (fieldConfig.type === 'numeric' || fieldConfig.type === 'currency') {
         const num = parseFloat(value)
         if (fieldConfig.min !== undefined && num < fieldConfig.min) {
           return `Minimum value is ${fieldConfig.min}`
