@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
 import { ArrowLeft } from 'lucide-react'
 import { getTaskTypeConfig } from '../types/taskConfigs'
-import type { Task, TaskStatus, EvidenceType, StoredEvidence } from '../types/models'
+import type { Task, TaskStatus, EvidenceType } from '../types/models'
+import type { StoredEvidence } from '../utils/indexedDB'
 import PhotoCapture from '../components/capture/PhotoCapture'
 import EvidenceChecklist from '../components/capture/EvidenceChecklist'
 
@@ -91,19 +92,22 @@ export default function TaskDetail() {
     )
   }
 
+  const config = getTaskTypeConfig(task.taskType)
+  const statusConfig = TASK_STATUS_CONFIG[task.status]
+
   if (showCamera && selectedEvidenceType) {
     return (
       <PhotoCapture
         evidenceType={selectedEvidenceType}
         taskId={task.id}
+        jobId={task.jobId}
+        workerId={task.workerId}
+        label={config.label}
         onCapture={handleCaptureComplete}
         onCancel={handleCaptureCancel}
       />
     )
   }
-
-  const config = getTaskTypeConfig(task.taskType)
-  const statusConfig = TASK_STATUS_CONFIG[task.status]
 
   return (
     <div>
