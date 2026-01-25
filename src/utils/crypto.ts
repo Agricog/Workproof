@@ -3,11 +3,15 @@
  * SHA-256 hash generation for immutable evidence chain
  */
 
+const DEVICE_ID_KEY = 'workproof_device_id'
+
 /**
  * Generate SHA-256 hash from data
  */
 export async function generateHash(data: ArrayBuffer | Uint8Array): Promise<string> {
-  const buffer = data instanceof Uint8Array ? data.buffer : data
+  const buffer = data instanceof Uint8Array 
+    ? new Uint8Array(data).buffer as ArrayBuffer
+    : data
   const hashBuffer = await crypto.subtle.digest('SHA-256', buffer)
   const hashArray = Array.from(new Uint8Array(hashBuffer))
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
@@ -18,14 +22,21 @@ export async function generateHash(data: ArrayBuffer | Uint8Array): Promise<stri
  * This creates an immutable proof-of-work chain
  */
 export async function generateEvidenceHash(
-  photoData: ArrayBuffer | Uint8Array,
+  photoData: ArrayBuffer | Uint8Array | Blob,
   capturedAt: string,
   workerId: string
 ): Promise<string> {
-  // Convert photo data to Uint8Array if needed
-  const photoBytes = photoData instanceof Uint8Array 
-    ? photoData 
-    : new Uint8Array(photoData)
+  // Convert Blob to ArrayBuffer if needed
+  let arrayBuffer: ArrayBuffer
+  if (photoData instanceof Blob) {
+    arrayBuffer = await photoData.arrayBuffer()
+  } else if (photoData instanceof Uint8Array) {
+    arrayBuffer = photoData.buffer as ArrayBuffer
+  } else {
+    arrayBuffer = photoData
+  }
+
+  const photoBytes = new Uint8Array(arrayBuffer)
   
   // Encode metadata as UTF-8
   const encoder = new TextEncoder()
@@ -70,6 +81,30 @@ export function generateUUID(): string {
     const v = c === 'x' ? r : (r & 0x3) | 0x8
     return v.toString(16)
   })
+}
+
+/**
+ * Generate ID - alias for generateUUID
+ */
+export function generateId(): string {
+  return generateUUID()
+}
+
+/**
+ * Get or create a persistent device ID
+ * Stored in localStorage for device fingerprinting
+ */
+export function getDeviceId(): string {
+  if (typeof localStorage === 'undefined') {
+    return generateUUID()
+  }
+
+  let deviceId = localStorage.getItem(DEVICE_ID_KEY)
+  if (!deviceId) {
+    deviceId = generateUUID()
+    localStorage.setItem(DEVICE_ID_KEY, deviceId)
+  }
+  return deviceId
 }
 
 /**
