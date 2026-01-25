@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Helmet } from 'react-helmet-async'
-import { FileText, Download, Filter, Loader2 } from 'lucide-react'
+import { FileText, Download, Loader2 } from 'lucide-react'
 
 interface AuditPack {
   id: string
