@@ -5,6 +5,7 @@
 
 const DB_NAME = 'workproof'
 const DB_VERSION = 1
+const STORAGE_WARNING_THRESHOLD = 0.8 // 80% of quota
 
 export interface StoredEvidence {
   id: string
@@ -95,10 +96,10 @@ export async function openDatabase(): Promise<IDBDatabase> {
  * Save evidence to IndexedDB
  */
 export async function saveEvidence(evidence: StoredEvidence): Promise<void> {
-  const localDb = await openDatabase()
+  const db = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const transaction = localDb.transaction(['evidence'], 'readwrite')
+    const transaction = db.transaction(['evidence'], 'readwrite')
     const store = transaction.objectStore('evidence')
     const request = store.put(evidence)
 
@@ -111,10 +112,10 @@ export async function saveEvidence(evidence: StoredEvidence): Promise<void> {
  * Get evidence by ID
  */
 export async function getEvidence(id: string): Promise<StoredEvidence | null> {
-  const localDb = await openDatabase()
+  const db = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const transaction = localDb.transaction(['evidence'], 'readonly')
+    const transaction = db.transaction(['evidence'], 'readonly')
     const store = transaction.objectStore('evidence')
     const request = store.get(id)
 
@@ -127,10 +128,10 @@ export async function getEvidence(id: string): Promise<StoredEvidence | null> {
  * Get all evidence for a task
  */
 export async function getEvidenceByTask(taskId: string): Promise<StoredEvidence[]> {
-  const localDb = await openDatabase()
+  const db = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const transaction = localDb.transaction(['evidence'], 'readonly')
+    const transaction = db.transaction(['evidence'], 'readonly')
     const store = transaction.objectStore('evidence')
     const index = store.index('taskId')
     const request = index.getAll(taskId)
@@ -144,24 +145,41 @@ export async function getEvidenceByTask(taskId: string): Promise<StoredEvidence[
  * Get unsynced evidence
  */
 export async function getUnsyncedEvidence(): Promise<StoredEvidence[]> {
-  const localDb = await openDatabase()
+  const db = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const transaction = localDb.transaction(['evidence'], 'readonly')
+    const transaction = db.transaction(['evidence'], 'readonly')
     const store = transaction.objectStore('evidence')
-    const index = store.index('synced')
-    const request = index.getAll(false)
+    const results: StoredEvidence[] = []
+
+    const request = store.openCursor()
 
     request.onerror = () => reject(new Error('Failed to get unsynced evidence'))
-    request.onsuccess = () => resolve(request.result || [])
+    request.onsuccess = (event) => {
+      const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result
+      if (cursor) {
+        if (cursor.value.synced === false) {
+          results.push(cursor.value)
+        }
+        cursor.continue()
+      } else {
+        resolve(results)
+      }
+    }
   })
+}
+
+/**
+ * Get pending evidence (alias for getUnsyncedEvidence)
+ */
+export async function getPendingEvidence(): Promise<StoredEvidence[]> {
+  return getUnsyncedEvidence()
 }
 
 /**
  * Mark evidence as synced
  */
 export async function markEvidenceSynced(id: string): Promise<void> {
-  const localDb = await openDatabase()
   const evidence = await getEvidence(id)
 
   if (!evidence) {
@@ -178,10 +196,10 @@ export async function markEvidenceSynced(id: string): Promise<void> {
  * Delete evidence
  */
 export async function deleteEvidence(id: string): Promise<void> {
-  const localDb = await openDatabase()
+  const db = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const transaction = localDb.transaction(['evidence'], 'readwrite')
+    const transaction = db.transaction(['evidence'], 'readwrite')
     const store = transaction.objectStore('evidence')
     const request = store.delete(id)
 
@@ -194,7 +212,7 @@ export async function deleteEvidence(id: string): Promise<void> {
  * Add item to sync queue
  */
 export async function addToSyncQueue(item: Omit<SyncQueueItem, 'id' | 'attempts' | 'lastAttempt' | 'createdAt'>): Promise<string> {
-  const localDb = await openDatabase()
+  const db = await openDatabase()
   const id = crypto.randomUUID()
 
   const queueItem: SyncQueueItem = {
@@ -206,7 +224,7 @@ export async function addToSyncQueue(item: Omit<SyncQueueItem, 'id' | 'attempts'
   }
 
   return new Promise((resolve, reject) => {
-    const transaction = localDb.transaction(['syncQueue'], 'readwrite')
+    const transaction = db.transaction(['syncQueue'], 'readwrite')
     const store = transaction.objectStore('syncQueue')
     const request = store.put(queueItem)
 
@@ -219,10 +237,10 @@ export async function addToSyncQueue(item: Omit<SyncQueueItem, 'id' | 'attempts'
  * Get all sync queue items
  */
 export async function getSyncQueue(): Promise<SyncQueueItem[]> {
-  const localDb = await openDatabase()
+  const db = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const transaction = localDb.transaction(['syncQueue'], 'readonly')
+    const transaction = db.transaction(['syncQueue'], 'readonly')
     const store = transaction.objectStore('syncQueue')
     const request = store.getAll()
 
@@ -235,10 +253,10 @@ export async function getSyncQueue(): Promise<SyncQueueItem[]> {
  * Remove item from sync queue
  */
 export async function removeFromSyncQueue(id: string): Promise<void> {
-  const localDb = await openDatabase()
+  const db = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const transaction = localDb.transaction(['syncQueue'], 'readwrite')
+    const transaction = db.transaction(['syncQueue'], 'readwrite')
     const store = transaction.objectStore('syncQueue')
     const request = store.delete(id)
 
@@ -251,10 +269,10 @@ export async function removeFromSyncQueue(id: string): Promise<void> {
  * Update sync queue item attempt count
  */
 export async function updateSyncAttempt(id: string): Promise<void> {
-  const localDb = await openDatabase()
+  const db = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const transaction = localDb.transaction(['syncQueue'], 'readwrite')
+    const transaction = db.transaction(['syncQueue'], 'readwrite')
     const store = transaction.objectStore('syncQueue')
     const getRequest = store.get(id)
 
@@ -291,16 +309,45 @@ export async function getStorageUsage(): Promise<{ used: number; quota: number }
 }
 
 /**
+ * Get storage stats (alias for getStorageUsage with additional info)
+ */
+export async function getStorageStats(): Promise<{
+  used: number
+  quota: number
+  percentage: number
+  pendingCount: number
+}> {
+  const usage = await getStorageUsage()
+  const pending = await getPendingEvidence()
+
+  return {
+    used: usage.used,
+    quota: usage.quota,
+    percentage: usage.quota > 0 ? (usage.used / usage.quota) * 100 : 0,
+    pendingCount: pending.length,
+  }
+}
+
+/**
+ * Check if storage is near limit
+ */
+export async function isStorageNearLimit(): Promise<boolean> {
+  const usage = await getStorageUsage()
+  if (usage.quota === 0) return false
+  return usage.used / usage.quota > STORAGE_WARNING_THRESHOLD
+}
+
+/**
  * Clear all local data
  */
 export async function clearAllData(): Promise<void> {
-  const localDb = await openDatabase()
+  const db = await openDatabase()
 
   const stores = ['evidence', 'syncQueue', 'jobs', 'tasks']
 
   for (const storeName of stores) {
     await new Promise<void>((resolve, reject) => {
-      const transaction = localDb.transaction([storeName], 'readwrite')
+      const transaction = db.transaction([storeName], 'readwrite')
       const store = transaction.objectStore(storeName)
       const request = store.clear()
 
@@ -314,10 +361,10 @@ export async function clearAllData(): Promise<void> {
  * Get count of items in a store
  */
 export async function getStoreCount(storeName: string): Promise<number> {
-  const localDb = await openDatabase()
+  const db = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const transaction = localDb.transaction([storeName], 'readonly')
+    const transaction = db.transaction([storeName], 'readonly')
     const store = transaction.objectStore(storeName)
     const request = store.count()
 
