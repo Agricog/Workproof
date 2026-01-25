@@ -11,6 +11,8 @@ import { initializeSentry, ErrorFallback } from './utils/errorTracking'
 import { initDB } from './utils/indexedDB'
 import { setupAutoSync } from './services/sync'
 import './index.css'
+import { HelmetProvider } from 'react-helmet-async'
+// Then wrap: <HelmetProvider><App /></HelmetProvider>
 
 // Initialize Sentry
 initializeSentry()
