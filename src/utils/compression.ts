@@ -5,6 +5,7 @@
 
 const TARGET_SIZE_KB = 300
 const MAX_DIMENSION = 2048
+const THUMBNAIL_SIZE = 200
 const QUALITY_STEPS = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4]
 
 export interface CompressionResult {
@@ -77,6 +78,30 @@ export async function compressImage(
     compressedSize: blob.size,
     compressionRatio: originalSize / blob.size,
   }
+}
+
+/**
+ * Generate thumbnail from blob - returns base64 data URL
+ */
+export async function generateThumbnail(
+  file: File | Blob,
+  maxSize: number = THUMBNAIL_SIZE
+): Promise<string> {
+  const img = await loadImage(file)
+  const { width, height } = calculateDimensions(img.width, img.height, maxSize)
+
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    throw new Error('Failed to get canvas context')
+  }
+
+  ctx.drawImage(img, 0, 0, width, height)
+
+  return canvas.toDataURL('image/jpeg', 0.7)
 }
 
 /**
