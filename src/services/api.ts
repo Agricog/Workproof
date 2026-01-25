@@ -1,192 +1,192 @@
 /**
  * WorkProof API Service
  * Secure API calls with CSRF protection
- * NEVER expose API keys - all sensitive calls through backend
  */
 
-import { ensureCsrfToken, clearCsrfToken } from '../utils/csrf'
 import { captureError } from '../utils/errorTracking'
-import { validateRelativeUrl } from '../utils/validation'
-import type { ApiResult, ApiError } from '../types/api'
+import type { Job, Task, Evidence } from '../types/models'
 
-// ============================================================================
-// CONFIGURATION
-// ============================================================================
+const API_BASE = import.meta.env.VITE_API_URL || ''
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api'
-
-const DEFAULT_HEADERS: Record<string, string> = {
-  'Content-Type': 'application/json',
+interface ApiResponse<T> {
+  data?: T
+  error?: string
+  status: number
 }
 
-// ============================================================================
-// CORE FETCH FUNCTION
-// ============================================================================
-
-interface FetchOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
-  body?: Record<string, unknown>
-  headers?: Record<string, string>
-  requiresCsrf?: boolean
-  timeout?: number
-}
-
-export async function apiFetch<T>(
+/**
+ * Make authenticated API request
+ */
+async function apiRequest<T>(
   endpoint: string,
-  options: FetchOptions = {}
-): Promise<ApiResult<T>> {
-  const {
-    method = 'GET',
-    body,
-    headers = {},
-    requiresCsrf = method !== 'GET',
-    timeout = 30000,
-  } = options
-
-  // SSRF Prevention - only allow relative URLs
-  if (!validateRelativeUrl(endpoint)) {
-    const error: ApiError = {
-      success: false,
-      error: {
-        code: 'INVALID_URL',
-        message: 'Only relative URLs are allowed',
-      },
-    }
-    return error
-  }
-
-  const url = `${API_BASE_URL}${endpoint}`
-
+  options: RequestInit = {}
+): Promise<ApiResponse<T>> {
   try {
-    const requestHeaders: Record<string, string> = {
-      ...DEFAULT_HEADERS,
-      ...headers,
-    }
-
-    // Add CSRF token for state-changing requests
-    if (requiresCsrf) {
-      try {
-        const csrfToken = await ensureCsrfToken()
-        requestHeaders['X-CSRF-Token'] = csrfToken
-      } catch {
-        // Continue without CSRF if token fetch fails
-        console.warn('CSRF token unavailable')
-      }
-    }
-
-    // Create abort controller for timeout
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), timeout)
+    const url = `${API_BASE}${endpoint}`
 
     const response = await fetch(url, {
-      method,
-      headers: requestHeaders,
+      ...options,
       credentials: 'include',
-      body: body ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
     })
 
-    clearTimeout(timeoutId)
-
-    // Handle CSRF token expiry
-    if (response.status === 403) {
-      clearCsrfToken()
-    }
-
-    // Parse response
-    const data = await response.json()
-
     if (!response.ok) {
-      const error: ApiError = {
-        success: false,
-        error: {
-          code: data.code || `HTTP_${response.status}`,
-          message: data.message || 'Request failed',
-          details: data.details,
-        },
+      const errorData = await response.json().catch(() => ({}))
+      return {
+        status: response.status,
+        error: errorData.message || `Request failed with status ${response.status}`,
       }
-      return error
     }
 
+    const data = await response.json()
+    return { data, status: response.status }
+  } catch (error) {
+    captureError(error, 'apiRequest')
     return {
-      success: true,
-      data: data as T,
+      status: 0,
+      error: 'Network error. Please check your connection.',
     }
-  } catch (err) {
-    const error = err as Error
-
-    // Don't log abort errors
-    if (error.name !== 'AbortError') {
-      captureError(error, 'apiFetch', { endpoint, method })
-    }
-
-    const apiError: ApiError = {
-      success: false,
-      error: {
-        code: error.name === 'AbortError' ? 'TIMEOUT' : 'NETWORK_ERROR',
-        message:
-          error.name === 'AbortError'
-            ? 'Request timed out'
-            : 'Network error. Please check your connection.',
-      },
-    }
-
-    return apiError
   }
 }
 
-// ============================================================================
-// CONVENIENCE METHODS
-// ============================================================================
+// Jobs API
+export const jobsApi = {
+  list: async (): Promise<ApiResponse<Job[]>> => {
+    return apiRequest<Job[]>('/api/jobs')
+  },
 
-export const api = {
-  get: <T>(endpoint: string, options?: Omit<FetchOptions, 'method' | 'body'>) =>
-    apiFetch<T>(endpoint, { ...options, method: 'GET' }),
+  get: async (id: string): Promise<ApiResponse<Job>> => {
+    return apiRequest<Job>(`/api/jobs/${id}`)
+  },
 
-  post: <T>(
-    endpoint: string,
-    body: Record<string, unknown>,
-    options?: Omit<FetchOptions, 'method' | 'body'>
-  ) => apiFetch<T>(endpoint, { ...options, method: 'POST', body }),
+  create: async (data: Partial<Job>): Promise<ApiResponse<Job>> => {
+    return apiRequest<Job>('/api/jobs', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
 
-  put: <T>(
-    endpoint: string,
-    body: Record<string, unknown>,
-    options?: Omit<FetchOptions, 'method' | 'body'>
-  ) => apiFetch<T>(endpoint, { ...options, method: 'PUT', body }),
+  update: async (id: string, data: Partial<Job>): Promise<ApiResponse<Job>> => {
+    return apiRequest<Job>(`/api/jobs/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  },
 
-  patch: <T>(
-    endpoint: string,
-    body: Record<string, unknown>,
-    options?: Omit<FetchOptions, 'method' | 'body'>
-  ) => apiFetch<T>(endpoint, { ...options, method: 'PATCH', body }),
-
-  delete: <T>(endpoint: string, options?: Omit<FetchOptions, 'method'>) =>
-    apiFetch<T>(endpoint, { ...options, method: 'DELETE' }),
+  delete: async (id: string): Promise<ApiResponse<void>> => {
+    return apiRequest<void>(`/api/jobs/${id}`, {
+      method: 'DELETE',
+    })
+  },
 }
 
-// ============================================================================
-// TYPE GUARDS
-// ============================================================================
+// Tasks API
+export const tasksApi = {
+  listByJob: async (jobId: string): Promise<ApiResponse<Task[]>> => {
+    return apiRequest<Task[]>(`/api/jobs/${jobId}/tasks`)
+  },
 
-export function isApiError(result: ApiResult<unknown>): result is ApiError {
-  return !result.success
+  get: async (jobId: string, taskId: string): Promise<ApiResponse<Task>> => {
+    return apiRequest<Task>(`/api/jobs/${jobId}/tasks/${taskId}`)
+  },
+
+  create: async (jobId: string, data: Partial<Task>): Promise<ApiResponse<Task>> => {
+    return apiRequest<Task>(`/api/jobs/${jobId}/tasks`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  update: async (
+    jobId: string,
+    taskId: string,
+    data: Partial<Task>
+  ): Promise<ApiResponse<Task>> => {
+    return apiRequest<Task>(`/api/jobs/${jobId}/tasks/${taskId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  },
 }
 
-export function isApiSuccess<T>(
-  result: ApiResult<T>
-): result is { success: true; data: T } {
-  return result.success
+// Evidence API
+export const evidenceApi = {
+  listByTask: async (taskId: string): Promise<ApiResponse<Evidence[]>> => {
+    return apiRequest<Evidence[]>(`/api/tasks/${taskId}/evidence`)
+  },
+
+  upload: async (
+    taskId: string,
+    data: {
+      evidenceType: string
+      photoData: string
+      thumbnailData: string
+      hash: string
+      capturedAt: string
+      latitude: number | null
+      longitude: number | null
+      accuracy: number | null
+    }
+  ): Promise<ApiResponse<Evidence>> => {
+    return apiRequest<Evidence>(`/api/tasks/${taskId}/evidence`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  delete: async (taskId: string, evidenceId: string): Promise<ApiResponse<void>> => {
+    return apiRequest<void>(`/api/tasks/${taskId}/evidence/${evidenceId}`, {
+      method: 'DELETE',
+    })
+  },
 }
 
-// ============================================================================
-// ERROR HELPERS
-// ============================================================================
+// Audit Pack API
+export const auditPackApi = {
+  generate: async (params: {
+    jobIds?: string[]
+    taskIds?: string[]
+    dateFrom?: string
+    dateTo?: string
+  }): Promise<ApiResponse<{ url: string; expiresAt: string }>> => {
+    return apiRequest('/api/audit-packs', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    })
+  },
 
-export function getErrorMessage(result: ApiError): string {
-  return result.error.message
+  list: async (): Promise<ApiResponse<Array<{
+    id: string
+    createdAt: string
+    jobCount: number
+    evidenceCount: number
+    url: string
+  }>>> => {
+    return apiRequest('/api/audit-packs')
+  },
 }
 
-export function getErrorCode(result: ApiError): string {
-  return result.error.code
+// User/Org API
+export const userApi = {
+  getProfile: async (): Promise<ApiResponse<{
+    id: string
+    email: string
+    name: string
+    orgId: string
+    role: string
+  }>> => {
+    return apiRequest('/api/user/profile')
+  },
+
+  updateProfile: async (data: {
+    name?: string
+  }): Promise<ApiResponse<void>> => {
+    return apiRequest('/api/user/profile', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  },
 }
