@@ -1,161 +1,206 @@
-/**
- * WorkProof Main App
- * Routing and global providers
- */
-
+import { lazy, Suspense, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { ClerkProvider, SignedIn, SignedOut, RedirectToSignIn } from '@clerk/clerk-react'
-import * as Sentry from '@sentry/react'
+import { ClerkProvider, SignedIn, SignedOut } from '@clerk/clerk-react'
 import Layout from './components/layout/Layout'
-import OfflineIndicator from './components/common/OfflineIndicator'
+import { startSyncService, stopSyncService } from './services/sync'
 
-// Pages (lazy loaded)
-import { lazy, Suspense } from 'react'
-
+// Lazy load pages
+const Landing = lazy(() => import('./pages/Landing'))
+const Login = lazy(() => import('./pages/Login'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Jobs = lazy(() => import('./pages/Jobs'))
-const JobDetail = lazy(() => import('./pages/JobDetail'))
 const NewJob = lazy(() => import('./pages/NewJob'))
+const JobDetail = lazy(() => import('./pages/JobDetail'))
 const TaskDetail = lazy(() => import('./pages/TaskDetail'))
 const AuditPacks = lazy(() => import('./pages/AuditPacks'))
 const Settings = lazy(() => import('./pages/Settings'))
-const Login = lazy(() => import('./pages/Login'))
-const Landing = lazy(() => import('./pages/Landing'))
-
-// Clerk publishable key
-const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
-
-if (!clerkPubKey) {
-  console.warn('Clerk publishable key not found - auth disabled')
-}
-
-// Sentry routing integration
-const SentryRoutes = Sentry.withSentryReactRouterV6Routing(Routes)
 
 // Loading spinner
-function PageLoader() {
+function LoadingSpinner() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="flex flex-col items-center gap-3">
-        <div className="w-10 h-10 border-4 border-green-600 border-t-transparent rounded-full animate-spin" />
-        <p className="text-gray-600 text-sm">Loading...</p>
-      </div>
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="w-8 h-8 border-4 border-green-600 border-t-transparent rounded-full animate-spin"></div>
     </div>
   )
 }
 
 // Protected route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  if (!clerkPubKey) {
-    // Auth disabled - allow access
-    return <>{children}</>
-  }
-
   return (
-    <>
-      <SignedIn>{children}</SignedIn>
-      <SignedOut>
-        <RedirectToSignIn />
-      </SignedOut>
-    </>
+    <SignedIn>
+      <Layout>{children}</Layout>
+    </SignedIn>
   )
 }
 
-export default function App() {
-  const content = (
-    <BrowserRouter>
-      <Suspense fallback={<PageLoader />}>
-        <SentryRoutes>
-          {/* Public routes */}
-          <Route path="/" element={<Landing />} />
-          <Route path="/login" element={<Login />} />
+// Get Clerk publishable key
+const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
-          {/* Protected routes */}
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
+export default function App() {
+  useEffect(() => {
+    // Start sync service when app loads
+    startSyncService()
+
+    return () => {
+      stopSyncService()
+    }
+  }, [])
+
+  // If no Clerk key, show app without auth (development mode)
+  if (!clerkPubKey) {
+    return (
+      <BrowserRouter>
+        <Suspense fallback={<LoadingSpinner />}>
+          <Routes>
+            <Route path="/" element={<Landing />} />
+            <Route path="/login" element={<Navigate to="/dashboard" replace />} />
+            <Route
+              path="/dashboard"
+              element={
                 <Layout>
                   <Dashboard />
                 </Layout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/jobs"
-            element={
-              <ProtectedRoute>
+              }
+            />
+            <Route
+              path="/jobs"
+              element={
                 <Layout>
                   <Jobs />
                 </Layout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/jobs/new"
-            element={
-              <ProtectedRoute>
+              }
+            />
+            <Route
+              path="/jobs/new"
+              element={
                 <Layout>
                   <NewJob />
                 </Layout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/jobs/:jobId"
-            element={
-              <ProtectedRoute>
+              }
+            />
+            <Route
+              path="/jobs/:jobId"
+              element={
                 <Layout>
                   <JobDetail />
                 </Layout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/jobs/:jobId/tasks/:taskId"
-            element={
-              <ProtectedRoute>
+              }
+            />
+            <Route
+              path="/jobs/:jobId/tasks/:taskId"
+              element={
                 <Layout>
                   <TaskDetail />
                 </Layout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/audit-packs"
-            element={
-              <ProtectedRoute>
+              }
+            />
+            <Route
+              path="/audit-packs"
+              element={
                 <Layout>
                   <AuditPacks />
                 </Layout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/settings"
-            element={
-              <ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
                 <Layout>
                   <Settings />
                 </Layout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </SentryRoutes>
-      </Suspense>
-
-      {/* Global components */}
-      <OfflineIndicator />
-    </BrowserRouter>
-  )
-
-  // Wrap with Clerk if key available
-  if (clerkPubKey) {
-    return <ClerkProvider publishableKey={clerkPubKey}>{content}</ClerkProvider>
+              }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+      </BrowserRouter>
+    )
   }
 
-  return content
+  return (
+    <ClerkProvider publishableKey={clerkPubKey}>
+      <BrowserRouter>
+        <Suspense fallback={<LoadingSpinner />}>
+          <Routes>
+            {/* Public routes */}
+            <Route path="/" element={<Landing />} />
+            <Route
+              path="/login"
+              element={
+                <>
+                  <SignedIn>
+                    <Navigate to="/dashboard" replace />
+                  </SignedIn>
+                  <SignedOut>
+                    <Login />
+                  </SignedOut>
+                </>
+              }
+            />
+
+            {/* Protected routes */}
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/jobs"
+              element={
+                <ProtectedRoute>
+                  <Jobs />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/jobs/new"
+              element={
+                <ProtectedRoute>
+                  <NewJob />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/jobs/:jobId"
+              element={
+                <ProtectedRoute>
+                  <JobDetail />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/jobs/:jobId/tasks/:taskId"
+              element={
+                <ProtectedRoute>
+                  <TaskDetail />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/audit-packs"
+              element={
+                <ProtectedRoute>
+                  <AuditPacks />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <Settings />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Catch-all redirect */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+      </BrowserRouter>
+    </ClerkProvider>
+  )
 }
