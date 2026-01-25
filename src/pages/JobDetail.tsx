@@ -1,8 +1,3 @@
-/**
- * WorkProof Job Detail
- * View job with tasks and evidence progress
- */
-
 import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
@@ -12,8 +7,6 @@ import {
   Calendar,
   ChevronRight,
   MoreVertical,
-  CheckCircle,
-  Clock,
   Camera,
   Edit,
   Trash2,
@@ -45,7 +38,6 @@ export default function JobDetail() {
   const loadJobData = async () => {
     setIsLoading(true)
     try {
-      // TODO: Fetch from API - Placeholder data
       setJob({
         id: jobId || '1',
         orgId: '1',
@@ -82,7 +74,7 @@ export default function JobDetail() {
   }
 
   const handleDeleteJob = async () => {
-    if (!confirm('Are you sure you want to delete this job? This cannot be undone.')) {
+    if (!confirm('Are you sure you want to delete this job?')) {
       return
     }
     navigate('/jobs')
@@ -95,9 +87,9 @@ export default function JobDetail() {
   if (isLoading) {
     return (
       <div className="animate-pulse space-y-4">
-        <div className="h-8 bg-gray-200 rounded w-1/2" />
-        <div className="h-4 bg-gray-200 rounded w-3/4" />
-        <div className="h-32 bg-gray-200 rounded" />
+        <div className="h-8 bg-gray-200 rounded w-1/2"></div>
+        <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+        <div className="h-32 bg-gray-200 rounded"></div>
       </div>
     )
   }
@@ -118,14 +110,13 @@ export default function JobDetail() {
   const progressPercent = totalRequired > 0 ? Math.round((totalEvidence / totalRequired) * 100) : 0
 
   return (
-    <>
+    <div>
       <Helmet>
         <title>{job.clientName} | WorkProof</title>
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
 
       <div className="animate-fade-in">
-        {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <button
             onClick={() => navigate(-1)}
@@ -145,11 +136,11 @@ export default function JobDetail() {
             </button>
 
             {showMenu && (
-              <>
+              <div>
                 <div
                   className="fixed inset-0 z-10"
                   onClick={() => setShowMenu(false)}
-                />
+                ></div>
                 <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
                   <button
                     onClick={() => setShowMenu(false)}
@@ -174,12 +165,11 @@ export default function JobDetail() {
                     Delete Job
                   </button>
                 </div>
-              </>
+              </div>
             )}
           </div>
         </div>
 
-        {/* Job Info Card */}
         <div className="card mb-6">
           <h1 className="text-xl font-bold text-gray-900 mb-3">{job.clientName}</h1>
 
@@ -201,7 +191,6 @@ export default function JobDetail() {
             </div>
           </div>
 
-          {/* Progress */}
           <div className="mt-4 pt-4 border-t border-gray-100">
             <div className="flex items-center justify-between text-sm mb-2">
               <span className="text-gray-600">Evidence Progress</span>
@@ -213,12 +202,11 @@ export default function JobDetail() {
               <div
                 className="bg-green-600 h-2 rounded-full transition-all duration-300"
                 style={{ width: `${progressPercent}%` }}
-              />
+              ></div>
             </div>
           </div>
         </div>
 
-        {/* Tasks */}
         <div>
           <h2 className="font-semibold text-gray-900 mb-3">Tasks</h2>
 
@@ -262,14 +250,13 @@ export default function JobDetail() {
                       <ChevronRight className="w-5 h-5 text-gray-400 flex-shrink-0" />
                     </div>
 
-                    {/* Mini progress bar */}
                     <div className="mt-3 w-full bg-gray-200 rounded-full h-1.5">
                       <div
                         className={`h-1.5 rounded-full transition-all ${
                           progress === 100 ? 'bg-green-600' : 'bg-amber-500'
                         }`}
                         style={{ width: `${progress}%` }}
-                      />
+                      ></div>
                     </div>
                   </Link>
                 )
@@ -278,6 +265,6 @@ export default function JobDetail() {
           )}
         </div>
       </div>
-    </>
+    </div>
   )
 }
