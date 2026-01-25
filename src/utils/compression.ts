@@ -1,3 +1,4 @@
+
 /**
  * WorkProof Image Compression
  * Optimized for iOS PWA 50MB limit
@@ -206,7 +207,8 @@ export function blobToBase64(blob: Blob): Promise<string> {
  */
 export function base64ToBlob(base64: string, type: string = 'image/jpeg'): Blob {
   const parts = base64.split(',')
-  const byteString = atob(parts[1] || parts[0])
+  const base64Data = parts[1] || parts[0] || ''
+  const byteString = atob(base64Data)
   const ab = new ArrayBuffer(byteString.length)
   const ia = new Uint8Array(ab)
 
