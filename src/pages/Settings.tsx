@@ -12,6 +12,8 @@ import {
 import { getStorageUsage, clearAllData } from '../utils/indexedDB'
 import { formatBytes } from '../utils/compression'
 import { forceSyncNow, getSyncStatus } from '../services/sync'
+import { sanitizeUrl } from '../utils/sanitization'
+import { trackEvent, trackEvidenceSynced } from '../utils/analytics'
 
 interface SettingsLink {
   icon: typeof User
@@ -19,6 +21,7 @@ interface SettingsLink {
   description: string
   action: () => void
   external?: boolean
+  href?: string
 }
 
 export default function Settings() {
@@ -49,6 +52,7 @@ export default function Settings() {
     try {
       await forceSyncNow()
       await loadSyncStatus()
+      trackEvidenceSynced(pendingSync)
     } finally {
       setIsSyncing(false)
     }
@@ -64,8 +68,19 @@ export default function Settings() {
       await clearAllData()
       await loadStorageInfo()
       await loadSyncStatus()
+      trackEvent({
+        action: 'local_data_cleared',
+        category: 'settings',
+      })
     } finally {
       setIsClearing(false)
+    }
+  }
+
+  const openExternalLink = (url: string) => {
+    const safeUrl = sanitizeUrl(url)
+    if (safeUrl) {
+      window.open(safeUrl, '_blank', 'noopener,noreferrer')
     }
   }
 
@@ -95,14 +110,14 @@ export default function Settings() {
       icon: ExternalLink,
       label: 'Help Centre',
       description: 'Guides and FAQs',
-      action: () => window.open('https://help.workproof.co.uk', '_blank'),
+      action: () => openExternalLink('https://help.workproof.co.uk'),
       external: true,
     },
     {
       icon: ExternalLink,
       label: 'Contact Support',
       description: 'Get help from our team',
-      action: () => window.open('mailto:support@workproof.co.uk', '_blank'),
+      action: () => openExternalLink('mailto:support@workproof.co.uk'),
       external: true,
     },
   ]
@@ -151,6 +166,7 @@ export default function Settings() {
                 onClick={handleSync}
                 disabled={isSyncing || pendingSync === 0}
                 className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors disabled:opacity-50"
+                aria-label="Sync now"
               >
                 <RefreshCw className={`w-5 h-5 ${isSyncing ? 'animate-spin' : ''}`} />
               </button>
