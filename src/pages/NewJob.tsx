@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
 import { ArrowLeft, MapPin, User, Calendar, Plus } from 'lucide-react'
 import { validateAddress, validateClientName } from '../utils/validation'
+import { sanitizeInput } from '../utils/sanitization'
 import { TASK_TYPE_CONFIGS } from '../types/taskConfigs'
 import type { TaskType } from '../types/models'
 import { captureError } from '../utils/errorTracking'
+import { trackJobCreated } from '../utils/analytics'
 
 interface FormData {
   address: string
@@ -33,8 +35,9 @@ export default function NewJob() {
   const [errors, setErrors] = useState<FormErrors>({})
 
   const handleAddressChange = (value: string) => {
-    setFormData((prev) => ({ ...prev, address: value }))
-    const validation = validateAddress(value)
+    const sanitized = sanitizeInput(value)
+    setFormData((prev) => ({ ...prev, address: sanitized }))
+    const validation = validateAddress(sanitized)
     if (!validation.isValid) {
       const errorKeys = Object.keys(validation.errors)
       const errorKey = errorKeys[0]
@@ -47,8 +50,9 @@ export default function NewJob() {
   }
 
   const handleClientNameChange = (value: string) => {
-    setFormData((prev) => ({ ...prev, clientName: value }))
-    const validation = validateClientName(value)
+    const sanitized = sanitizeInput(value)
+    setFormData((prev) => ({ ...prev, clientName: sanitized }))
+    const validation = validateClientName(sanitized)
     if (!validation.isValid) {
       const errorKeys = Object.keys(validation.errors)
       const errorKey = errorKeys[0]
@@ -116,6 +120,9 @@ export default function NewJob() {
       // TODO: API call to create job
       // For now, simulate success
       await new Promise((resolve) => setTimeout(resolve, 500))
+
+      // Track analytics
+      trackJobCreated(formData.selectedTasks.length)
 
       navigate('/jobs')
     } catch (error) {
