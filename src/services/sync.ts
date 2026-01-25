@@ -12,7 +12,7 @@ import {
   type SyncQueueItem 
 } from '../utils/indexedDB'
 import { evidenceApi } from './api'
-import { captureError, captureSyncError } from '../utils/errorTracking'
+import { captureSyncError } from '../utils/errorTracking'
 
 const MAX_RETRY_ATTEMPTS = 5
 const SYNC_INTERVAL_MS = 60 * 1000 // 1 minute
