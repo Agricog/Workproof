@@ -1,278 +1,327 @@
 /**
  * WorkProof IndexedDB Storage
- * Offline-first evidence storage for PWA
- * iOS limit: 50MB - we target 45MB max
+ * Offline-first evidence storage with sync queue
  */
-
-import type { OfflineEvidenceItem, OfflineStorageStats } from '../types/api'
-import { STORAGE_LIMITS } from '../types/api'
 
 const DB_NAME = 'workproof'
 const DB_VERSION = 1
 
-// Store names
-const STORES = {
-  EVIDENCE: 'evidence',
-  SYNC_QUEUE: 'sync_queue',
-  METADATA: 'metadata',
-} as const
+export interface StoredEvidence {
+  id: string
+  taskId: string
+  jobId: string
+  evidenceType: string
+  photoData: string
+  thumbnailData: string
+  hash: string
+  capturedAt: string
+  latitude: number | null
+  longitude: number | null
+  accuracy: number | null
+  workerId: string
+  synced: boolean
+  syncedAt: string | null
+  createdAt: string
+}
 
-// ============================================================================
-// DATABASE INITIALIZATION
-// ============================================================================
+export interface SyncQueueItem {
+  id: string
+  type: 'evidence' | 'job' | 'task'
+  action: 'create' | 'update' | 'delete'
+  data: Record<string, unknown>
+  attempts: number
+  lastAttempt: string | null
+  createdAt: string
+}
 
 let dbInstance: IDBDatabase | null = null
 
-export async function initDB(): Promise<IDBDatabase> {
-  if (dbInstance) return dbInstance
+/**
+ * Open or create the database
+ */
+export async function openDatabase(): Promise<IDBDatabase> {
+  if (dbInstance) {
+    return dbInstance
+  }
 
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
 
-    request.onerror = () => reject(request.error)
+    request.onerror = () => {
+      reject(new Error('Failed to open database'))
+    }
 
     request.onsuccess = () => {
       dbInstance = request.result
-      resolve(dbInstance)
+      resolve(request.result)
     }
 
     request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result
+      const target = event.target as IDBOpenDBRequest
+      const newDb = target.result
 
       // Evidence store
-      if (!db.objectStoreNames.contains(STORES.EVIDENCE)) {
-        const evidenceStore = db.createObjectStore(STORES.EVIDENCE, {
-          keyPath: 'id',
-        })
+      if (!newDb.objectStoreNames.contains('evidence')) {
+        const evidenceStore = newDb.createObjectStore('evidence', { keyPath: 'id' })
         evidenceStore.createIndex('taskId', 'taskId', { unique: false })
-        evidenceStore.createIndex('syncStatus', 'syncStatus', { unique: false })
+        evidenceStore.createIndex('jobId', 'jobId', { unique: false })
+        evidenceStore.createIndex('synced', 'synced', { unique: false })
         evidenceStore.createIndex('createdAt', 'createdAt', { unique: false })
       }
 
       // Sync queue store
-      if (!db.objectStoreNames.contains(STORES.SYNC_QUEUE)) {
-        const syncStore = db.createObjectStore(STORES.SYNC_QUEUE, {
-          keyPath: 'id',
-        })
-        syncStore.createIndex('status', 'status', { unique: false })
-        syncStore.createIndex('timestamp', 'timestamp', { unique: false })
+      if (!newDb.objectStoreNames.contains('syncQueue')) {
+        const syncStore = newDb.createObjectStore('syncQueue', { keyPath: 'id' })
+        syncStore.createIndex('type', 'type', { unique: false })
+        syncStore.createIndex('createdAt', 'createdAt', { unique: false })
       }
 
-      // Metadata store
-      if (!db.objectStoreNames.contains(STORES.METADATA)) {
-        db.createObjectStore(STORES.METADATA, { keyPath: 'key' })
+      // Jobs cache store
+      if (!newDb.objectStoreNames.contains('jobs')) {
+        const jobsStore = newDb.createObjectStore('jobs', { keyPath: 'id' })
+        jobsStore.createIndex('status', 'status', { unique: false })
+      }
+
+      // Tasks cache store
+      if (!newDb.objectStoreNames.contains('tasks')) {
+        const tasksStore = newDb.createObjectStore('tasks', { keyPath: 'id' })
+        tasksStore.createIndex('jobId', 'jobId', { unique: false })
       }
     }
   })
 }
 
-// ============================================================================
-// EVIDENCE OPERATIONS
-// ============================================================================
-
-export async function saveEvidence(
-  evidence: OfflineEvidenceItem
-): Promise<void> {
-  const db = await initDB()
-
-  // Check storage limits first
-  const stats = await getStorageStats()
-  if (stats.totalItems >= STORAGE_LIMITS.MAX_QUEUE_ITEMS) {
-    throw new Error('Storage limit reached. Please sync pending evidence.')
-  }
+/**
+ * Save evidence to IndexedDB
+ */
+export async function saveEvidence(evidence: StoredEvidence): Promise<void> {
+  const localDb = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORES.EVIDENCE, 'readwrite')
-    const store = tx.objectStore(STORES.EVIDENCE)
+    const transaction = localDb.transaction(['evidence'], 'readwrite')
+    const store = transaction.objectStore('evidence')
     const request = store.put(evidence)
 
+    request.onerror = () => reject(new Error('Failed to save evidence'))
     request.onsuccess = () => resolve()
-    request.onerror = () => reject(request.error)
   })
 }
 
-export async function getEvidence(id: string): Promise<OfflineEvidenceItem | null> {
-  const db = await initDB()
+/**
+ * Get evidence by ID
+ */
+export async function getEvidence(id: string): Promise<StoredEvidence | null> {
+  const localDb = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORES.EVIDENCE, 'readonly')
-    const store = tx.objectStore(STORES.EVIDENCE)
+    const transaction = localDb.transaction(['evidence'], 'readonly')
+    const store = transaction.objectStore('evidence')
     const request = store.get(id)
 
+    request.onerror = () => reject(new Error('Failed to get evidence'))
     request.onsuccess = () => resolve(request.result || null)
-    request.onerror = () => reject(request.error)
   })
 }
 
-export async function getEvidenceByTask(
-  taskId: string
-): Promise<OfflineEvidenceItem[]> {
-  const db = await initDB()
+/**
+ * Get all evidence for a task
+ */
+export async function getEvidenceByTask(taskId: string): Promise<StoredEvidence[]> {
+  const localDb = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORES.EVIDENCE, 'readonly')
-    const store = tx.objectStore(STORES.EVIDENCE)
+    const transaction = localDb.transaction(['evidence'], 'readonly')
+    const store = transaction.objectStore('evidence')
     const index = store.index('taskId')
     const request = index.getAll(taskId)
 
+    request.onerror = () => reject(new Error('Failed to get evidence'))
     request.onsuccess = () => resolve(request.result || [])
-    request.onerror = () => reject(request.error)
   })
 }
 
-export async function getPendingEvidence(): Promise<OfflineEvidenceItem[]> {
-  const db = await initDB()
+/**
+ * Get unsynced evidence
+ */
+export async function getUnsyncedEvidence(): Promise<StoredEvidence[]> {
+  const localDb = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORES.EVIDENCE, 'readonly')
-    const store = tx.objectStore(STORES.EVIDENCE)
-    const index = store.index('syncStatus')
-    const request = index.getAll('pending')
+    const transaction = localDb.transaction(['evidence'], 'readonly')
+    const store = transaction.objectStore('evidence')
+    const index = store.index('synced')
+    const request = index.getAll(false)
 
+    request.onerror = () => reject(new Error('Failed to get unsynced evidence'))
     request.onsuccess = () => resolve(request.result || [])
-    request.onerror = () => reject(request.error)
   })
 }
 
-export async function updateEvidenceStatus(
-  id: string,
-  status: OfflineEvidenceItem['syncStatus'],
-  error?: string
-): Promise<void> {
-  const db = await initDB()
+/**
+ * Mark evidence as synced
+ */
+export async function markEvidenceSynced(id: string): Promise<void> {
+  const localDb = await openDatabase()
   const evidence = await getEvidence(id)
 
   if (!evidence) {
-    throw new Error(`Evidence not found: ${id}`)
+    throw new Error('Evidence not found')
   }
 
-  evidence.syncStatus = status
-  if (error) {
-    evidence.lastError = error
-    evidence.retryCount = (evidence.retryCount || 0) + 1
-  }
+  evidence.synced = true
+  evidence.syncedAt = new Date().toISOString()
 
   return saveEvidence(evidence)
 }
 
+/**
+ * Delete evidence
+ */
 export async function deleteEvidence(id: string): Promise<void> {
-  const db = await initDB()
+  const localDb = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORES.EVIDENCE, 'readwrite')
-    const store = tx.objectStore(STORES.EVIDENCE)
+    const transaction = localDb.transaction(['evidence'], 'readwrite')
+    const store = transaction.objectStore('evidence')
     const request = store.delete(id)
 
+    request.onerror = () => reject(new Error('Failed to delete evidence'))
     request.onsuccess = () => resolve()
-    request.onerror = () => reject(request.error)
   })
 }
 
-export async function clearSyncedEvidence(): Promise<number> {
-  const db = await initDB()
+/**
+ * Add item to sync queue
+ */
+export async function addToSyncQueue(item: Omit<SyncQueueItem, 'id' | 'attempts' | 'lastAttempt' | 'createdAt'>): Promise<string> {
+  const localDb = await openDatabase()
+  const id = crypto.randomUUID()
+
+  const queueItem: SyncQueueItem = {
+    ...item,
+    id,
+    attempts: 0,
+    lastAttempt: null,
+    createdAt: new Date().toISOString(),
+  }
 
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORES.EVIDENCE, 'readwrite')
-    const store = tx.objectStore(STORES.EVIDENCE)
-    const index = store.index('syncStatus')
-    const request = index.openCursor(IDBKeyRange.only('synced'))
+    const transaction = localDb.transaction(['syncQueue'], 'readwrite')
+    const store = transaction.objectStore('syncQueue')
+    const request = store.put(queueItem)
 
-    let deleted = 0
-
-    request.onsuccess = (event) => {
-      const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result
-      if (cursor) {
-        cursor.delete()
-        deleted++
-        cursor.continue()
-      } else {
-        resolve(deleted)
-      }
-    }
-
-    request.onerror = () => reject(request.error)
+    request.onerror = () => reject(new Error('Failed to add to sync queue'))
+    request.onsuccess = () => resolve(id)
   })
 }
 
-// ============================================================================
-// STORAGE STATS
-// ============================================================================
-
-export async function getStorageStats(): Promise<OfflineStorageStats> {
-  const db = await initDB()
+/**
+ * Get all sync queue items
+ */
+export async function getSyncQueue(): Promise<SyncQueueItem[]> {
+  const localDb = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORES.EVIDENCE, 'readonly')
-    const store = tx.objectStore(STORES.EVIDENCE)
+    const transaction = localDb.transaction(['syncQueue'], 'readonly')
+    const store = transaction.objectStore('syncQueue')
     const request = store.getAll()
 
-    request.onsuccess = () => {
-      const items = request.result as OfflineEvidenceItem[]
-      let totalSize = 0
-      let pendingCount = 0
-      let oldestAt: string | null = null
-
-      items.forEach((item) => {
-        if (item.photoBlob) {
-          totalSize += item.photoBlob.size
-        }
-        if (item.syncStatus === 'pending') {
-          pendingCount++
-        }
-        if (!oldestAt || item.createdAt < oldestAt) {
-          oldestAt = item.createdAt
-        }
-      })
-
-      resolve({
-        totalItems: items.length,
-        totalSizeBytes: totalSize,
-        oldestItemAt: oldestAt,
-        pendingUploadCount: pendingCount,
-      })
-    }
-
-    request.onerror = () => reject(request.error)
+    request.onerror = () => reject(new Error('Failed to get sync queue'))
+    request.onsuccess = () => resolve(request.result || [])
   })
 }
 
-export async function isStorageNearLimit(): Promise<boolean> {
-  const stats = await getStorageStats()
-  return stats.totalSizeBytes >= STORAGE_LIMITS.WARNING_THRESHOLD_BYTES
-}
-
-// ============================================================================
-// METADATA
-// ============================================================================
-
-export async function setMetadata(
-  key: string,
-  value: unknown
-): Promise<void> {
-  const db = await initDB()
+/**
+ * Remove item from sync queue
+ */
+export async function removeFromSyncQueue(id: string): Promise<void> {
+  const localDb = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORES.METADATA, 'readwrite')
-    const store = tx.objectStore(STORES.METADATA)
-    const request = store.put({ key, value, updatedAt: new Date().toISOString() })
+    const transaction = localDb.transaction(['syncQueue'], 'readwrite')
+    const store = transaction.objectStore('syncQueue')
+    const request = store.delete(id)
 
+    request.onerror = () => reject(new Error('Failed to remove from sync queue'))
     request.onsuccess = () => resolve()
-    request.onerror = () => reject(request.error)
   })
 }
 
-export async function getMetadata<T>(key: string): Promise<T | null> {
-  const db = await initDB()
+/**
+ * Update sync queue item attempt count
+ */
+export async function updateSyncAttempt(id: string): Promise<void> {
+  const localDb = await openDatabase()
 
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORES.METADATA, 'readonly')
-    const store = tx.objectStore(STORES.METADATA)
-    const request = store.get(key)
+    const transaction = localDb.transaction(['syncQueue'], 'readwrite')
+    const store = transaction.objectStore('syncQueue')
+    const getRequest = store.get(id)
 
-    request.onsuccess = () => {
-      const result = request.result
-      resolve(result ? result.value : null)
+    getRequest.onerror = () => reject(new Error('Failed to get sync item'))
+    getRequest.onsuccess = () => {
+      const item = getRequest.result
+      if (!item) {
+        reject(new Error('Sync item not found'))
+        return
+      }
+
+      item.attempts += 1
+      item.lastAttempt = new Date().toISOString()
+
+      const putRequest = store.put(item)
+      putRequest.onerror = () => reject(new Error('Failed to update sync item'))
+      putRequest.onsuccess = () => resolve()
     }
-    request.onerror = () => reject(request.error)
+  })
+}
+
+/**
+ * Get storage usage estimate
+ */
+export async function getStorageUsage(): Promise<{ used: number; quota: number }> {
+  if ('storage' in navigator && 'estimate' in navigator.storage) {
+    const estimate = await navigator.storage.estimate()
+    return {
+      used: estimate.usage || 0,
+      quota: estimate.quota || 0,
+    }
+  }
+  return { used: 0, quota: 0 }
+}
+
+/**
+ * Clear all local data
+ */
+export async function clearAllData(): Promise<void> {
+  const localDb = await openDatabase()
+
+  const stores = ['evidence', 'syncQueue', 'jobs', 'tasks']
+
+  for (const storeName of stores) {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = localDb.transaction([storeName], 'readwrite')
+      const store = transaction.objectStore(storeName)
+      const request = store.clear()
+
+      request.onerror = () => reject(new Error(`Failed to clear ${storeName}`))
+      request.onsuccess = () => resolve()
+    })
+  }
+}
+
+/**
+ * Get count of items in a store
+ */
+export async function getStoreCount(storeName: string): Promise<number> {
+  const localDb = await openDatabase()
+
+  return new Promise((resolve, reject) => {
+    const transaction = localDb.transaction([storeName], 'readonly')
+    const store = transaction.objectStore(storeName)
+    const request = store.count()
+
+    request.onerror = () => reject(new Error(`Failed to count ${storeName}`))
+    request.onsuccess = () => resolve(request.result)
   })
 }
