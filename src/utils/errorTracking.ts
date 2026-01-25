@@ -41,18 +41,3 @@ export function setUserContext(userId: string): void {
 export function clearUserContext(): void {
   Sentry.setUser(null)
 }
-
-interface ErrorFallbackProps {
-  error: Error
-  resetErrorBoundary: () => void
-}
-
-export function ErrorFallback({ error, resetErrorBoundary }: ErrorFallbackProps): JSX.Element {
-  return (
-    <div style={{ padding: '2rem', textAlign: 'center' }}>
-      <h2>Something went wrong</h2>
-      <p>{error.message}</p>
-      <button onClick={resetErrorBoundary}>Try again</button>
-    </div>
-  )
-}
