@@ -1,159 +1,108 @@
-/**
- * WorkProof Session Timeout
- * Protect authenticated sessions from hijacking
- * Auto-logout after inactivity (30 min for field work)
- */
+import { useEffect, useCallback, useRef } from 'react'
 
-import { useEffect, useRef, useCallback } from 'react'
-import { SESSION_CONFIG } from '../types/security'
-
-interface UseSessionTimeoutOptions {
+interface SessionTimeoutConfig {
+  idleTimeoutMs?: number
+  absoluteTimeoutMs?: number
   onTimeout: () => void
-  onWarning?: () => void
-  warningBeforeMs?: number
+  enabled?: boolean
 }
 
-export function useSessionTimeout(options: UseSessionTimeoutOptions): void {
-  const { onTimeout, onWarning, warningBeforeMs = 60000 } = options
-  
-  const idleTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const warningTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const absoluteTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+const DEFAULT_IDLE_TIMEOUT = 30 * 60 * 1000 // 30 minutes
+const DEFAULT_ABSOLUTE_TIMEOUT = 8 * 60 * 60 * 1000 // 8 hours
+
+export function useSessionTimeout({
+  idleTimeoutMs = DEFAULT_IDLE_TIMEOUT,
+  absoluteTimeoutMs = DEFAULT_ABSOLUTE_TIMEOUT,
+  onTimeout,
+  enabled = true,
+}: SessionTimeoutConfig) {
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const absoluteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const sessionStartRef = useRef<number>(Date.now())
 
-  const clearTimeouts = useCallback(() => {
-    if (idleTimeoutRef.current) {
-      clearTimeout(idleTimeoutRef.current)
-      idleTimeoutRef.current = null
+  const clearTimers = useCallback(() => {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current)
+      idleTimerRef.current = null
     }
-    if (warningTimeoutRef.current) {
-      clearTimeout(warningTimeoutRef.current)
-      warningTimeoutRef.current = null
+    if (absoluteTimerRef.current) {
+      clearTimeout(absoluteTimerRef.current)
+      absoluteTimerRef.current = null
     }
   }, [])
 
-  const resetIdleTimeout = useCallback(() => {
-    clearTimeouts()
+  const resetIdleTimer = useCallback(() => {
+    if (!enabled) return
 
-    // Warning before timeout
-    if (onWarning) {
-      warningTimeoutRef.current = setTimeout(() => {
-        onWarning()
-      }, SESSION_CONFIG.idleTimeout - warningBeforeMs)
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current)
     }
 
-    // Idle timeout
-    idleTimeoutRef.current = setTimeout(() => {
+    idleTimerRef.current = setTimeout(() => {
+      console.log('Session idle timeout reached')
       onTimeout()
-    }, SESSION_CONFIG.idleTimeout)
-  }, [clearTimeouts, onTimeout, onWarning, warningBeforeMs])
+    }, idleTimeoutMs)
+  }, [enabled, idleTimeoutMs, onTimeout])
+
+  const startAbsoluteTimer = useCallback(() => {
+    if (!enabled) return
+
+    sessionStartRef.current = Date.now()
+
+    absoluteTimerRef.current = setTimeout(() => {
+      console.log('Session absolute timeout reached')
+      onTimeout()
+    }, absoluteTimeoutMs)
+  }, [enabled, absoluteTimeoutMs, onTimeout])
 
   useEffect(() => {
-    // Track user activity
+    if (!enabled) {
+      clearTimers()
+      return
+    }
+
     const activityEvents = [
       'mousedown',
+      'mousemove',
       'keydown',
       'scroll',
       'touchstart',
-      'mousemove',
+      'click',
     ]
 
     const handleActivity = () => {
-      resetIdleTimeout()
-    }
-
-    // Throttle activity handler
-    let lastActivity = Date.now()
-    const throttledHandler = () => {
-      const now = Date.now()
-      if (now - lastActivity > 1000) {
-        lastActivity = now
-        handleActivity()
-      }
+      resetIdleTimer()
     }
 
     activityEvents.forEach((event) => {
-      window.addEventListener(event, throttledHandler, { passive: true })
+      document.addEventListener(event, handleActivity, { passive: true })
     })
 
-    // Absolute session timeout (8 hours)
-    absoluteTimeoutRef.current = setTimeout(() => {
-      onTimeout()
-    }, SESSION_CONFIG.absoluteTimeout)
-
-    // Start idle tracking
-    resetIdleTimeout()
+    resetIdleTimer()
+    startAbsoluteTimer()
 
     return () => {
       activityEvents.forEach((event) => {
-        window.removeEventListener(event, throttledHandler)
+        document.removeEventListener(event, handleActivity)
       })
-      clearTimeouts()
-      if (absoluteTimeoutRef.current) {
-        clearTimeout(absoluteTimeoutRef.current)
-      }
+      clearTimers()
     }
-  }, [resetIdleTimeout, clearTimeouts, onTimeout])
+  }, [enabled, resetIdleTimer, startAbsoluteTimer, clearTimers])
 
-  // Handle visibility change (tab switching)
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        // Check if session has expired while tab was hidden
-        const elapsed = Date.now() - sessionStartRef.current
-        if (elapsed > SESSION_CONFIG.absoluteTimeout) {
-          onTimeout()
-        }
-      }
-    }
+  const getRemainingTime = useCallback(() => {
+    const elapsed = Date.now() - sessionStartRef.current
+    return Math.max(0, absoluteTimeoutMs - elapsed)
+  }, [absoluteTimeoutMs])
 
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-    }
-  }, [onTimeout])
-}
+  const extendSession = useCallback(() => {
+    clearTimers()
+    resetIdleTimer()
+    startAbsoluteTimer()
+  }, [clearTimers, resetIdleTimer, startAbsoluteTimer])
 
-// ============================================================================
-// SESSION STORAGE HELPERS
-// ============================================================================
-
-const SESSION_START_KEY = 'workproof_session_start'
-const LAST_ACTIVITY_KEY = 'workproof_last_activity'
-
-export function initSession(): void {
-  const now = Date.now().toString()
-  sessionStorage.setItem(SESSION_START_KEY, now)
-  sessionStorage.setItem(LAST_ACTIVITY_KEY, now)
-}
-
-export function updateActivity(): void {
-  sessionStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString())
-}
-
-export function getSessionDuration(): number {
-  const start = sessionStorage.getItem(SESSION_START_KEY)
-  if (!start) return 0
-  return Date.now() - parseInt(start, 10)
-}
-
-export function getIdleTime(): number {
-  const lastActivity = sessionStorage.getItem(LAST_ACTIVITY_KEY)
-  if (!lastActivity) return 0
-  return Date.now() - parseInt(lastActivity, 10)
-}
-
-export function clearSession(): void {
-  sessionStorage.removeItem(SESSION_START_KEY)
-  sessionStorage.removeItem(LAST_ACTIVITY_KEY)
-}
-
-export function isSessionValid(): boolean {
-  const duration = getSessionDuration()
-  const idle = getIdleTime()
-  
-  return (
-    duration < SESSION_CONFIG.absoluteTimeout &&
-    idle < SESSION_CONFIG.idleTimeout
-  )
+  return {
+    getRemainingTime,
+    extendSession,
+    resetIdleTimer,
+  }
 }
