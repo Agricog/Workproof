@@ -1,72 +1,135 @@
 /**
  * WorkProof Input Validation
  * OWASP-compliant input validation and sanitization
- * NEVER trust user input - always validate AND sanitize
  */
 
-import type { ValidationResult, InputType } from '../types/security'
-
-// ============================================================================
-// VALIDATION PATTERNS
-// ============================================================================
-
-const VALIDATION_PATTERNS: Record<InputType, RegExp> = {
-  email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-  phone: /^(?:\+44|0)[1-9]\d{8,9}$/,
-  text: /^[\w\s\-.,!?'"()\[\]{}:;@#£$%&*+=<>\/\\|~`^]+$/,
-  number: /^-?\d+(\.\d+)?$/,
-  currency: /^\d+(\.\d{1,2})?$/,
-  postcode: /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i,
-  niceic_number: /^[A-Z0-9]{5,10}$/i,
-  jib_card: /^[A-Z0-9]{6,8}$/i,
+export interface ValidationResult {
+  isValid: boolean
+  errors: Record<string, string>
+  sanitized: string
 }
 
-// ============================================================================
-// CORE VALIDATION FUNCTION
-// ============================================================================
+// Validation patterns
+const PATTERNS = {
+  email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+  phone: /^[\d\s\-+()]+$/,
+  postcode: /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i,
+  alphanumeric: /^[a-zA-Z0-9\s]+$/,
+  numeric: /^\d+$/,
+  currency: /^\d+(\.\d{1,2})?$/,
+}
 
+/**
+ * Validate and sanitize user input
+ */
 export function validateInput(
   input: string,
-  type: InputType,
+  type: 'email' | 'phone' | 'text' | 'postcode' | 'numeric' | 'currency' | 'alphanumeric',
   maxLength: number = 255
 ): ValidationResult {
   const errors: Record<string, string> = {}
   let sanitized = input.trim()
 
+  // Length validation
   if (sanitized.length === 0) {
-    return { isValid: true, errors: {}, sanitized: '' }
-  }
-
-  if (sanitized.length > maxLength) {
+    errors.required = 'This field is required'
+  } else if (sanitized.length > maxLength) {
     errors.length = `Maximum ${maxLength} characters allowed`
+    sanitized = sanitized.substring(0, maxLength)
   }
 
-  const pattern = VALIDATION_PATTERNS[type]
-  if (pattern && !pattern.test(sanitized)) {
-    switch (type) {
-      case 'email':
+  // Type-specific validation
+  switch (type) {
+    case 'email':
+      if (sanitized && !PATTERNS.email.test(sanitized)) {
         errors.format = 'Invalid email format'
-        break
-      case 'phone':
-        errors.format = 'Invalid UK phone number'
-        break
-      case 'number':
-        errors.format = 'Must be a valid number'
-        break
-      case 'currency':
+      }
+      break
+
+    case 'phone':
+      if (sanitized && !PATTERNS.phone.test(sanitized)) {
+        errors.format = 'Invalid phone number format'
+      }
+      break
+
+    case 'postcode':
+      if (sanitized && !PATTERNS.postcode.test(sanitized)) {
+        errors.format = 'Invalid UK postcode format'
+      }
+      break
+
+    case 'numeric':
+      if (sanitized && !PATTERNS.numeric.test(sanitized)) {
+        errors.format = 'Must contain only numbers'
+      }
+      break
+
+    case 'currency':
+      if (sanitized && !PATTERNS.currency.test(sanitized)) {
         errors.format = 'Invalid currency format (e.g., 123.45)'
-        break
-      case 'postcode':
-        errors.format = 'Invalid UK postcode'
-        break
-      case 'niceic_number':
-        errors.format = 'Invalid NICEIC number format'
-        break
-      case 'jib_card':
-        errors.format = 'Invalid JIB card number format'
-        break
-      default:
-        errors.format = 'Invalid format'
+      }
+      break
+
+    case 'alphanumeric':
+      if (sanitized && !PATTERNS.alphanumeric.test(sanitized)) {
+        errors.format = 'Must contain only letters and numbers'
+      }
+      break
+
+    case 'text':
+    default:
+      // Basic text - just sanitize
+      break
+  }
+
+  // XSS Protection: Escape dangerous characters
+  sanitized = escapeHtml(sanitized)
+
+  return {
+    isValid: Object.keys(errors).length === 0,
+    errors,
+    sanitized,
+  }
+}
+
+/**
+ * Escape HTML special characters to prevent XSS
+ */
+export function escapeHtml(str: string): string {
+  const htmlEscapes: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#x27;',
+    '/': '&#x2F;',
+  }
+
+  return str.replace(/[&<>"'/]/g, (char) => htmlEscapes[char] || char)
+}
+
+/**
+ * Validate address input
+ */
+export function validateAddress(address: string): ValidationResult {
+  const errors: Record<string, string> = {}
+  let sanitized = address.trim()
+
+  if (!sanitized) {
+    errors.required = 'Address is required'
+  } else if (sanitized.length < 10) {
+    errors.length = 'Address seems too short'
+  } else if (sanitized.length > 500) {
+    errors.length = 'Address is too long'
+    sanitized = sanitized.substring(0, 500)
+  }
+
+  // Check for suspicious patterns (potential injection)
+  const suspiciousPatterns = [/<script/i, /javascript:/i, /on\w+=/i]
+  for (const pattern of suspiciousPatterns) {
+    if (pattern.test(sanitized)) {
+      errors.security = 'Invalid characters detected'
+      sanitized = sanitized.replace(pattern, '')
     }
   }
 
@@ -79,181 +142,98 @@ export function validateInput(
   }
 }
 
-// ============================================================================
-// HTML ESCAPING
-// ============================================================================
-
-export function escapeHtml(unsafe: string): string {
-  return unsafe
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;')
-    .replace(/\//g, '&#x2F;')
-}
-
-export function unescapeHtml(safe: string): string {
-  return safe
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#x27;/g, "'")
-    .replace(/&#x2F;/g, '/')
-}
-
-// ============================================================================
-// FIELD VALIDATORS
-// ============================================================================
-
-export function validateEmail(email: string): ValidationResult {
-  return validateInput(email, 'email', 254)
-}
-
-export function validatePhone(phone: string): ValidationResult {
-  const cleaned = phone.replace(/[\s-]/g, '')
-  return validateInput(cleaned, 'phone', 15)
-}
-
-export function validatePostcode(postcode: string): ValidationResult {
-  return validateInput(postcode.toUpperCase(), 'postcode', 10)
-}
-
-export function validateNiceicNumber(number: string): ValidationResult {
-  return validateInput(number.toUpperCase(), 'niceic_number', 10)
-}
-
-export function validateJibCard(number: string): ValidationResult {
-  return validateInput(number.toUpperCase(), 'jib_card', 10)
-}
-
-export function validateCurrency(amount: string): ValidationResult {
-  return validateInput(amount, 'currency', 15)
-}
-
-// ============================================================================
-// OBJECT VALIDATION
-// ============================================================================
-
-export interface FieldValidation {
-  field: string
-  type: InputType
-  required?: boolean
-  maxLength?: number
-}
-
-export function validateObject(
-  obj: Record<string, string>,
-  fields: FieldValidation[]
-): { isValid: boolean; errors: Record<string, string> } {
+/**
+ * Validate client name
+ */
+export function validateClientName(name: string): ValidationResult {
   const errors: Record<string, string> = {}
+  let sanitized = name.trim()
 
-  for (const field of fields) {
-    const value = obj[field.field] ?? ''
-
-    if (field.required && !value.trim()) {
-      errors[field.field] = 'This field is required'
-      continue
-    }
-
-    if (!value.trim()) continue
-
-    const result = validateInput(value, field.type, field.maxLength)
-    if (!result.isValid) {
-      errors[field.field] = Object.values(result.errors)[0]
-    }
+  if (!sanitized) {
+    errors.required = 'Client name is required'
+  } else if (sanitized.length < 2) {
+    errors.length = 'Name is too short'
+  } else if (sanitized.length > 100) {
+    errors.length = 'Name is too long'
+    sanitized = sanitized.substring(0, 100)
   }
 
-  return {
-    isValid: Object.keys(errors).length === 0,
-    errors,
-  }
-}
-
-// ============================================================================
-// URL VALIDATION (SSRF Prevention)
-// ============================================================================
-
-export function validateRelativeUrl(url: string): boolean {
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    return false
-  }
-  if (url.startsWith('//')) {
-    return false
-  }
-  if (url.includes('://')) {
-    return false
-  }
-  return true
-}
-
-// ============================================================================
-// FILENAME SANITIZATION
-// ============================================================================
-
-export function sanitizeFilename(filename: string): string {
-  return filename
-    .replace(/[^a-zA-Z0-9.\-_]/g, '_')
-    .replace(/_{2,}/g, '_')
-    .replace(/^\.+/, '')
-    .substring(0, 100)
-}
-
-// ============================================================================
-// ADDRESS VALIDATION
-// ============================================================================
-
-export function validateAddress(address: string): ValidationResult {
-  const errors: Record<string, string> = {}
-  const sanitized = escapeHtml(address.trim())
-
-  if (sanitized.length < 10) {
-    errors.length = 'Address too short'
-  }
-
-  if (sanitized.length > 500) {
-    errors.length = 'Address too long (max 500 characters)'
-  }
-
-  const hasNumber = /\d/.test(sanitized)
-  const hasLetters = /[a-zA-Z]/.test(sanitized)
-
-  if (!hasNumber || !hasLetters) {
-    errors.format = 'Please enter a valid UK address'
-  }
-
-  return {
-    isValid: Object.keys(errors).length === 0,
-    errors,
-    sanitized,
-  }
-}
-
-// ============================================================================
-// NAME VALIDATION
-// ============================================================================
-
-export function validateName(name: string): ValidationResult {
-  const errors: Record<string, string> = {}
-  let sanitized = escapeHtml(name.trim())
-
-  if (sanitized.length < 2) {
-    errors.length = 'Name too short'
-  }
-
-  if (sanitized.length > 100) {
-    errors.length = 'Name too long (max 100 characters)'
-  }
-
-  if (!/^[a-zA-Z\s\-']+$/.test(name)) {
+  // Only allow letters, spaces, hyphens, apostrophes
+  const namePattern = /^[a-zA-Z\s\-']+$/
+  if (sanitized && !namePattern.test(sanitized)) {
     errors.format = 'Name contains invalid characters'
-    sanitized = sanitized.replace(/[^a-zA-Z\s\-']/g, '')
   }
+
+  sanitized = escapeHtml(sanitized)
 
   return {
     isValid: Object.keys(errors).length === 0,
     errors,
     sanitized,
   }
+}
+
+/**
+ * Validate file upload
+ */
+export interface FileValidationResult {
+  isValid: boolean
+  error?: string
+}
+
+export function validateFile(
+  file: File,
+  allowedTypes: string[],
+  maxSizeMB: number
+): FileValidationResult {
+  // Check file type
+  if (!allowedTypes.includes(file.type)) {
+    return {
+      isValid: false,
+      error: `File type not allowed. Allowed: ${allowedTypes.join(', ')}`,
+    }
+  }
+
+  // Check file size
+  const maxSizeBytes = maxSizeMB * 1024 * 1024
+  if (file.size > maxSizeBytes) {
+    return {
+      isValid: false,
+      error: `File too large. Maximum size: ${maxSizeMB}MB`,
+    }
+  }
+
+  // Check filename for suspicious patterns
+  const filename = file.name.toLowerCase()
+  const dangerousExtensions = ['.exe', '.bat', '.cmd', '.sh', '.php', '.js']
+  for (const ext of dangerousExtensions) {
+    if (filename.endsWith(ext)) {
+      return {
+        isValid: false,
+        error: 'File type not allowed for security reasons',
+      }
+    }
+  }
+
+  return { isValid: true }
+}
+
+/**
+ * Sanitize filename
+ */
+export function sanitizeFilename(filename: string): string {
+  // Remove path traversal attempts
+  let safe = filename.replace(/\.\./g, '')
+
+  // Remove special characters
+  safe = safe.replace(/[^a-zA-Z0-9.\-_]/g, '_')
+
+  // Limit length
+  if (safe.length > 100) {
+    const ext = safe.substring(safe.lastIndexOf('.'))
+    const name = safe.substring(0, 100 - ext.length)
+    safe = name + ext
+  }
+
+  return safe
 }
