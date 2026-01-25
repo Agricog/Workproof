@@ -7,24 +7,26 @@ import { useState, useEffect, useCallback } from 'react'
 import { Camera, X, RotateCcw, Check, MapPin, Clock, AlertCircle } from 'lucide-react'
 import { useCamera } from '../../hooks/useCamera'
 import { useGeolocation, formatCoordinates } from '../../hooks/useGeolocation'
-import { compressImage, generateThumbnail } from '../../utils/compression'
+import { compressImage, generateThumbnail, blobToBase64 } from '../../utils/compression'
 import { generateEvidenceHash, getDeviceId, generateId } from '../../utils/crypto'
 import { saveEvidence, isStorageNearLimit } from '../../utils/indexedDB'
 import { captureError } from '../../utils/errorTracking'
 import type { EvidenceType } from '../../types/models'
-import type { OfflineEvidenceItem } from '../../types/api'
+import type { StoredEvidence } from '../../utils/indexedDB'
 
 interface PhotoCaptureProps {
   taskId: string
+  jobId: string
   evidenceType: EvidenceType
   workerId: string
-  onCapture: (evidence: OfflineEvidenceItem) => void
+  onCapture: (evidence: StoredEvidence) => void
   onCancel: () => void
   label: string
 }
 
 export default function PhotoCapture({
   taskId,
+  jobId,
   evidenceType,
   workerId,
   onCapture,
@@ -79,10 +81,10 @@ export default function PhotoCapture({
     try {
       // Compress immediately
       const compressed = await compressImage(blob)
-      setCapturedBlob(compressed)
+      setCapturedBlob(compressed.blob)
 
       // Generate thumbnail for preview
-      const thumb = await generateThumbnail(compressed)
+      const thumb = await generateThumbnail(compressed.blob)
       setThumbnail(thumb)
 
       // Refresh location
@@ -112,19 +114,25 @@ export default function PhotoCapture({
       // Generate immutable hash
       const hash = await generateEvidenceHash(capturedBlob, capturedAt, workerId)
 
-      const evidence: OfflineEvidenceItem = {
+      // Convert blob to base64 for storage
+      const photoData = await blobToBase64(capturedBlob)
+      const thumbnailData = thumbnail || ''
+
+      const evidence: StoredEvidence = {
         id: generateId(),
         taskId,
+        jobId,
         evidenceType,
-        photoBlob: capturedBlob,
-        photoBytesHash: hash,
+        photoData,
+        thumbnailData,
+        hash,
         capturedAt,
-        capturedLat: location?.latitude ?? null,
-        capturedLng: location?.longitude ?? null,
+        latitude: location?.latitude ?? null,
+        longitude: location?.longitude ?? null,
+        accuracy: location?.accuracy ?? null,
         workerId,
-        deviceId,
-        syncStatus: 'pending',
-        retryCount: 0,
+        synced: false,
+        syncedAt: null,
         createdAt: capturedAt,
       }
 
@@ -143,7 +151,7 @@ export default function PhotoCapture({
     } finally {
       setIsSaving(false)
     }
-  }, [capturedBlob, taskId, evidenceType, workerId, location, onCapture])
+  }, [capturedBlob, thumbnail, taskId, jobId, evidenceType, workerId, location, onCapture])
 
   // Error state
   if (cameraError) {
