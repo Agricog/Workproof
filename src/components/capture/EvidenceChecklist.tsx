@@ -1,5 +1,6 @@
 import { Camera, CheckCircle, Circle } from 'lucide-react'
-import { getTaskTypeConfig, getEvidenceTypeLabel, type TaskType } from '../../types/taskConfigs'
+import { getTaskTypeConfig, getEvidenceLabel } from '../../types/taskConfigs'
+import type { TaskType } from '../../types/models'
 
 interface EvidenceChecklistProps {
   taskType: TaskType
@@ -27,7 +28,7 @@ export default function EvidenceChecklist({
 
         <div className="space-y-2">
           {requiredEvidence.map((evidenceType) => {
-            const label = getEvidenceTypeLabel(evidenceType)
+            const label = getEvidenceLabel(evidenceType)
             const completed = isComplete(evidenceType)
 
             return (
@@ -71,7 +72,7 @@ export default function EvidenceChecklist({
 
           <div className="space-y-2">
             {optionalEvidence.map((evidenceType) => {
-              const label = getEvidenceTypeLabel(evidenceType)
+              const label = getEvidenceLabel(evidenceType)
               const completed = isComplete(evidenceType)
 
               return (
