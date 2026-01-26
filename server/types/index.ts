@@ -5,6 +5,7 @@ export interface BaseRecord {
   id: string
   created_at?: string
   updated_at?: string
+  [key: string]: unknown // Index signature for SmartSuite compatibility
 }
 
 // User record
@@ -153,7 +154,7 @@ export interface UpdateJobRequest {
   client_name?: string
   client_phone?: string
   client_email?: string
-  status?: Job['status']
+  status?: 'draft' | 'in_progress' | 'completed' | 'archived'
   completion_date?: string
   notes?: string
 }
@@ -161,12 +162,12 @@ export interface UpdateJobRequest {
 export interface CreateTaskRequest {
   job: string
   task_type: TaskType
-  order: number
+  order?: number
   notes?: string
 }
 
 export interface UpdateTaskRequest {
-  status?: Task['status']
+  status?: 'pending' | 'in_progress' | 'completed' | 'skipped'
   notes?: string
   started_at?: string
   completed_at?: string
