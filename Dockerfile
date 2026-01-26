@@ -18,8 +18,8 @@ RUN npm run build
 FROM node:20-alpine
 WORKDIR /app
 
-# Install Caddy
-RUN apk add --no-cache caddy
+# Install Caddy and bash
+RUN apk add --no-cache caddy bash
 
 # Copy package files and install production dependencies only
 COPY package*.json ./
@@ -34,20 +34,29 @@ COPY --from=builder /app/dist ./dist
 # Copy built server from builder stage
 COPY --from=builder /app/dist-server ./dist-server
 
-# Create start script with better error handling
-RUN echo '#!/bin/sh' > /app/start.sh && \
-    echo 'echo "Starting Node.js server..."' >> /app/start.sh && \
-    echo 'node /app/dist-server/index.js 2>&1 &' >> /app/start.sh && \
-    echo 'sleep 2' >> /app/start.sh && \
-    echo 'echo "Starting Caddy..."' >> /app/start.sh && \
-    echo 'caddy run --config /etc/caddy/Caddyfile' >> /app/start.sh && \
-    chmod +x /app/start.sh
+# Create start script
+COPY <<EOF /app/start.sh
+#!/bin/bash
+echo "=== Starting Node.js server ==="
+node /app/dist-server/index.js &
+NODE_PID=\$!
+sleep 3
+if ! kill -0 \$NODE_PID 2>/dev/null; then
+    echo "=== Node.js failed to start ==="
+    exit 1
+fi
+echo "=== Node.js started on port 3001 ==="
+echo "=== Starting Caddy ==="
+caddy run --config /etc/caddy/Caddyfile
+EOF
+
+RUN chmod +x /app/start.sh
 
 # Expose port
 EXPOSE 8080
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/health || exit 1
 
 # Run both services
