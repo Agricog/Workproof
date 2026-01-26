@@ -34,22 +34,8 @@ COPY --from=builder /app/dist ./dist
 # Copy built server from builder stage
 COPY --from=builder /app/dist-server ./dist-server
 
-# Create start script
-COPY <<EOF /app/start.sh
-#!/bin/bash
-echo "=== Starting Node.js server ==="
-node /app/dist-server/index.js &
-NODE_PID=\$!
-sleep 3
-if ! kill -0 \$NODE_PID 2>/dev/null; then
-    echo "=== Node.js failed to start ==="
-    exit 1
-fi
-echo "=== Node.js started on port 3001 ==="
-echo "=== Starting Caddy ==="
-caddy run --config /etc/caddy/Caddyfile
-EOF
-
+# Copy start script
+COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
 # Expose port
