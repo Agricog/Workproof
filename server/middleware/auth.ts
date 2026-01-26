@@ -1,9 +1,5 @@
 import { Context, Next } from 'hono'
-import { createClerkClient } from '@clerk/backend'
-
-const clerk = createClerkClient({
-  secretKey: process.env.CLERK_SECRET_KEY
-})
+import { verifyToken } from '@clerk/backend'
 
 // Extended context with user info
 export interface AuthContext {
@@ -23,8 +19,17 @@ export async function authMiddleware(c: Context, next: Next) {
   const token = authHeader.replace('Bearer ', '')
 
   try {
+    const secretKey = process.env.CLERK_SECRET_KEY
+
+    if (!secretKey) {
+      console.error('CLERK_SECRET_KEY not configured')
+      return c.json({ error: 'Server configuration error' }, 500)
+    }
+
     // Verify the session token with Clerk
-    const session = await clerk.verifyToken(token)
+    const session = await verifyToken(token, {
+      secretKey
+    })
 
     if (!session) {
       return c.json({ error: 'Invalid session' }, 401)
@@ -33,7 +38,7 @@ export async function authMiddleware(c: Context, next: Next) {
     // Attach user info to context
     c.set('auth', {
       userId: session.sub,
-      sessionId: session.sid
+      sessionId: session.sid || ''
     } as AuthContext)
 
     await next()
@@ -62,13 +67,19 @@ export async function optionalAuthMiddleware(c: Context, next: Next) {
     const token = authHeader.replace('Bearer ', '')
 
     try {
-      const session = await clerk.verifyToken(token)
+      const secretKey = process.env.CLERK_SECRET_KEY
 
-      if (session) {
-        c.set('auth', {
-          userId: session.sub,
-          sessionId: session.sid
-        } as AuthContext)
+      if (secretKey) {
+        const session = await verifyToken(token, {
+          secretKey
+        })
+
+        if (session) {
+          c.set('auth', {
+            userId: session.sub,
+            sessionId: session.sid || ''
+          } as AuthContext)
+        }
       }
     } catch (error) {
       // Ignore auth errors for optional auth
