@@ -18,6 +18,7 @@ import {
 import { useUser } from '@clerk/clerk-react'
 import SyncStatus from '../components/common/SyncStatus'
 import { getStorageStats } from '../utils/indexedDB'
+import { trackPageView, trackError } from '../utils/analytics'
 import type { Job } from '../types/models'
 
 export default function Dashboard() {
@@ -31,6 +32,7 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
+    trackPageView('/dashboard', 'Dashboard')
     loadDashboardData()
   }, [])
 
@@ -79,6 +81,10 @@ export default function Dashboard() {
       ])
     } catch (error) {
       console.error('Failed to load dashboard data:', error)
+      trackError(
+        error instanceof Error ? error.name : 'unknown',
+        'dashboard_load'
+      )
     } finally {
       setIsLoading(false)
     }
