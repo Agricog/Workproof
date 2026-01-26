@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { Webhook } from 'svix'
 import { getSmartSuiteClient, TABLES } from '../lib/smartsuite.js'
+import { USER_FIELDS } from '../lib/smartsuite-fields.js'
 import type { User } from '../types/index.js'
 
 const clerkWebhook = new Hono()
@@ -97,7 +98,7 @@ async function handleUserCreated(data: ClerkWebhookEvent['data']) {
   // Check if user already exists
   const existingUser = await client.findByField<User>(
     TABLES.USERS,
-    'clerk_id',
+    USER_FIELDS.clerk_id,
     data.id
   )
 
@@ -106,16 +107,16 @@ async function handleUserCreated(data: ClerkWebhookEvent['data']) {
     return
   }
 
-  // Create new user in SmartSuite
-  const userData: Omit<User, 'id'> = {
-    clerk_id: data.id,
-    email: primaryEmail,
-    full_name: fullName,
-    subscription_status: 'free',
-    last_login: new Date().toISOString()
+  // Create new user in SmartSuite using field IDs
+  const userData = {
+    [USER_FIELDS.clerk_id]: data.id,
+    [USER_FIELDS.email]: primaryEmail,
+    [USER_FIELDS.full_name]: fullName,
+    [USER_FIELDS.subscription_status]: 'free',
+    [USER_FIELDS.last_login]: new Date().toISOString()
   }
 
-  const user = await client.createRecord<User>(TABLES.USERS, userData)
+  const user = await client.createRecord(TABLES.USERS, userData)
   console.log('User created in SmartSuite:', user.id)
 }
 
@@ -126,7 +127,7 @@ async function handleUserUpdated(data: ClerkWebhookEvent['data']) {
   // Find existing user
   const existingUser = await client.findByField<User>(
     TABLES.USERS,
-    'clerk_id',
+    USER_FIELDS.clerk_id,
     data.id
   )
 
@@ -141,19 +142,19 @@ async function handleUserUpdated(data: ClerkWebhookEvent['data']) {
     .filter(Boolean)
     .join(' ')
 
-  // Update user in SmartSuite
-  const updateData: Partial<User> = {}
+  // Update user in SmartSuite using field IDs
+  const updateData: Record<string, unknown> = {}
 
-  if (primaryEmail && primaryEmail !== existingUser.email) {
-    updateData.email = primaryEmail
+  if (primaryEmail && primaryEmail !== existingUser[USER_FIELDS.email]) {
+    updateData[USER_FIELDS.email] = primaryEmail
   }
 
-  if (fullName && fullName !== existingUser.full_name) {
-    updateData.full_name = fullName
+  if (fullName && fullName !== existingUser[USER_FIELDS.full_name]) {
+    updateData[USER_FIELDS.full_name] = fullName
   }
 
   if (Object.keys(updateData).length > 0) {
-    await client.updateRecord<User>(TABLES.USERS, existingUser.id, updateData)
+    await client.updateRecord(TABLES.USERS, existingUser.id, updateData)
     console.log('User updated in SmartSuite:', existingUser.id)
   }
 }
@@ -165,7 +166,7 @@ async function handleUserDeleted(data: ClerkWebhookEvent['data']) {
   // Find existing user
   const existingUser = await client.findByField<User>(
     TABLES.USERS,
-    'clerk_id',
+    USER_FIELDS.clerk_id,
     data.id
   )
 
@@ -175,9 +176,8 @@ async function handleUserDeleted(data: ClerkWebhookEvent['data']) {
   }
 
   // Soft delete - update subscription status
-  // We keep the record for audit purposes
-  await client.updateRecord<User>(TABLES.USERS, existingUser.id, {
-    subscription_status: 'free' // Downgrade to free
+  await client.updateRecord(TABLES.USERS, existingUser.id, {
+    [USER_FIELDS.subscription_status]: 'free'
   })
 
   console.log('User soft-deleted in SmartSuite:', existingUser.id)
@@ -190,7 +190,7 @@ async function handleSessionCreated(data: ClerkWebhookEvent['data']) {
   // Find existing user
   const existingUser = await client.findByField<User>(
     TABLES.USERS,
-    'clerk_id',
+    USER_FIELDS.clerk_id,
     data.id
   )
 
@@ -200,8 +200,8 @@ async function handleSessionCreated(data: ClerkWebhookEvent['data']) {
   }
 
   // Update last login
-  await client.updateRecord<User>(TABLES.USERS, existingUser.id, {
-    last_login: new Date().toISOString()
+  await client.updateRecord(TABLES.USERS, existingUser.id, {
+    [USER_FIELDS.last_login]: new Date().toISOString()
   })
 }
 
