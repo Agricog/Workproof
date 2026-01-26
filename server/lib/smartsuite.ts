@@ -43,10 +43,10 @@ class SmartSuiteClient {
     this.workspaceId = config.workspaceId
   }
 
-  private async request<T>(
+  private async request(
     endpoint: string,
     options: RequestInit = {}
-  ): Promise<T> {
+  ): Promise<unknown> {
     const url = `${SMARTSUITE_API_URL}${endpoint}`
     
     const response = await fetch(url, {
@@ -103,13 +103,14 @@ class SmartSuiteClient {
       body.offset = options.offset
     }
 
-    return this.request<ListResponse<T>>(
+    const result = await this.request(
       `/applications/${tableId}/records/list/`,
       {
         method: 'POST',
         body: JSON.stringify(body)
       }
     )
+    return result as ListResponse<T>
   }
 
   // Create new record
@@ -117,13 +118,14 @@ class SmartSuiteClient {
     tableId: string,
     data: Omit<T, 'id'>
   ): Promise<T> {
-    return this.request<T>(
+    const result = await this.request(
       `/applications/${tableId}/records/`,
       {
         method: 'POST',
         body: JSON.stringify(data)
       }
     )
+    return result as T
   }
 
   // Update existing record
@@ -132,13 +134,14 @@ class SmartSuiteClient {
     recordId: string,
     data: Partial<T>
   ): Promise<T> {
-    return this.request<T>(
+    const result = await this.request(
       `/applications/${tableId}/records/${recordId}/`,
       {
         method: 'PATCH',
         body: JSON.stringify(data)
       }
     )
+    return result as T
   }
 
   // Delete record
@@ -159,13 +162,14 @@ class SmartSuiteClient {
     tableId: string,
     records: Array<Omit<T, 'id'>>
   ): Promise<T[]> {
-    return this.request<T[]>(
+    const result = await this.request(
       `/applications/${tableId}/records/bulk/`,
       {
         method: 'POST',
         body: JSON.stringify({ items: records })
       }
     )
+    return result as T[]
   }
 
   // Find record by field value
