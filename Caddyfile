@@ -1,10 +1,20 @@
 :8080 {
-	# Serve static files from dist folder
-	root * /app/dist
-	file_server
+	# Proxy API requests to Hono server
+	handle /api/* {
+		reverse_proxy localhost:3001
+	}
 
-	# SPA fallback - serve index.html for all routes
-	try_files {path} /index.html
+	# Proxy webhook requests to Hono server
+	handle /webhooks/* {
+		reverse_proxy localhost:3001
+	}
+
+	# Serve static files from dist folder
+	handle {
+		root * /app/dist
+		file_server
+		try_files {path} /index.html
+	}
 
 	# Security Headers - OWASP Compliant
 	header {
@@ -47,7 +57,4 @@
 		path *.html /
 	}
 	header @html Cache-Control "no-cache, no-store, must-revalidate"
-
-	# Health check endpoint
-	respond /health 200
 }
