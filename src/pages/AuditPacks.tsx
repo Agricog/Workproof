@@ -26,7 +26,7 @@ export default function AuditPacks() {
 
   const handleGenerate = async () => {
     setIsGenerating(true)
-    
+
     trackEvent('audit_pack_generate_start', {
       date_from: dateFrom || 'not_set',
       date_to: dateTo || 'not_set',
@@ -35,7 +35,7 @@ export default function AuditPacks() {
 
     try {
       await new Promise((resolve) => setTimeout(resolve, 2000))
-      
+
       trackEvent('audit_pack_generate_success', {
         date_from: dateFrom || 'not_set',
         date_to: dateTo || 'not_set'
@@ -150,7 +150,7 @@ export default function AuditPacks() {
                       {pack.jobCount} jobs • {pack.evidenceCount} evidence items
                     </p>
                   </div>
-                  
+                  <a
                     href={pack.url}
                     target="_blank"
                     rel="noopener noreferrer"
