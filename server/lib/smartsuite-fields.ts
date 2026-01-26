@@ -13,8 +13,49 @@ export const USER_FIELDS = {
   last_login: 'sa124ad39b'
 } as const
 
-// We'll add Jobs, Tasks, Evidence, Audit Packs fields next
-export const JOB_FIELDS = {} as const
-export const TASK_FIELDS = {} as const
-export const EVIDENCE_FIELDS = {} as const
-export const AUDIT_PACK_FIELDS = {} as const
+export const JOB_FIELDS = {
+  user: 's11e8c3905',
+  title: 's81dd1e60e',
+  address: 's12140605b',
+  postcode: 's3529ab4e0',
+  client_name: 's265bc1e01',
+  client_phone: 'sffc9c0134',
+  client_email: 's7c5f10ae9',
+  status: 's71ac612d3',
+  start_date: 'sa5e86ccaf',
+  completion_date: 'se01dd301e',
+  notes: 's0b41ef34e',
+  created_at: 'sccc9692c5'
+} as const
+
+export const TASK_FIELDS = {
+  job: 'sdae9777c2',
+  task_type: 's49488096d',
+  status: 's4fd7b0b93',
+  order: 's39c59659e',
+  notes: 's351243277',
+  started_at: 'sf16099920',
+  completed_at: 's1f73c92ac'
+} as const
+
+export const EVIDENCE_FIELDS = {
+  task: 's9d23ccc51',
+  evidence_type: 'sc1907f924',
+  photo_url: 'sed7082c34',
+  photo_hash: 's8ef18ff24',
+  latitude: 'sc08cda9ac',
+  longitude: 'sc056ca7e2',
+  gps_accuracy: 'sb938a3c3a',
+  captured_at: 's7f7ca3c0b',
+  synced_at: 'sbb369206b',
+  is_synced: 'scfeb49a6e'
+} as const
+
+export const AUDIT_PACK_FIELDS = {
+  job: 'sc9f8fa1a7',
+  generated_at: 's6ba4184ab',
+  pdf_url: 's5eeb945bb',
+  evidence_count: 's8a866c291',
+  hash: 'sbf0136ef8',
+  downloaded_at: 'sdafb72e64'
+} as const
