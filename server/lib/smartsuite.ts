@@ -76,7 +76,8 @@ class SmartSuiteClient {
     tableId: string,
     recordId: string
   ): Promise<T> {
-    return this.request<T>(`/applications/${tableId}/records/${recordId}/`)
+    const result = await this.request(`/applications/${tableId}/records/${recordId}/`)
+    return result as T
   }
 
   // List records with optional filtering
