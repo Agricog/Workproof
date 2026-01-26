@@ -2,12 +2,10 @@
  * WorkProof Layout Component
  * Main app shell with navigation
  */
-
 import { ReactNode } from 'react'
 import Navigation from './Navigation'
 import { useSessionTimeout } from '../../hooks/useSessionTimeout'
 import { useNavigate } from 'react-router-dom'
-import { useClerk } from '@clerk/clerk-react'
 
 interface LayoutProps {
   children: ReactNode
@@ -15,11 +13,29 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   const navigate = useNavigate()
-  const { signOut } = useClerk()
+  
+  // Dynamically import Clerk to avoid errors when not in ClerkProvider
+  let signOut: (() => Promise<void>) | null = null
+  
+  try {
+    // Only use Clerk if available
+    const clerkKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
+    if (clerkKey) {
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      const { useClerk } = require('@clerk/clerk-react')
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      const clerk = useClerk()
+      signOut = clerk.signOut
+    }
+  } catch {
+    // Clerk not available
+  }
 
   const handleTimeout = async () => {
     try {
-      await signOut()
+      if (signOut) {
+        await signOut()
+      }
     } catch {
       // Ignore errors
     }
