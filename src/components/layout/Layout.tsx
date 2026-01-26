@@ -2,10 +2,11 @@
  * WorkProof Layout Component
  * Main app shell with navigation
  */
-import { ReactNode } from 'react'
+import { ReactNode, useCallback } from 'react'
 import Navigation from './Navigation'
 import { useSessionTimeout } from '../../hooks/useSessionTimeout'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '@clerk/clerk-react'
 
 interface LayoutProps {
   children: ReactNode
@@ -14,33 +15,19 @@ interface LayoutProps {
 export default function Layout({ children }: LayoutProps) {
   const navigate = useNavigate()
   
-  // Dynamically import Clerk to avoid errors when not in ClerkProvider
-  let signOut: (() => Promise<void>) | null = null
-  
-  try {
-    // Only use Clerk if available
-    const clerkKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
-    if (clerkKey) {
-      // eslint-disable-next-line react-hooks/rules-of-hooks
-      const { useClerk } = require('@clerk/clerk-react')
-      // eslint-disable-next-line react-hooks/rules-of-hooks
-      const clerk = useClerk()
-      signOut = clerk.signOut
-    }
-  } catch {
-    // Clerk not available
-  }
+  // useAuth is safer - returns undefined values when outside ClerkProvider
+  const { signOut, isLoaded } = useAuth()
 
-  const handleTimeout = async () => {
+  const handleTimeout = useCallback(async () => {
     try {
-      if (signOut) {
+      if (signOut && isLoaded) {
         await signOut()
       }
     } catch {
       // Ignore errors
     }
     navigate('/login?reason=timeout')
-  }
+  }, [signOut, isLoaded, navigate])
 
   useSessionTimeout({
     onTimeout: handleTimeout,
@@ -61,3 +48,14 @@ export default function Layout({ children }: LayoutProps) {
     </div>
   )
 }
+```
+
+Wait - `useAuth` will also fail outside ClerkProvider. The real issue is the env variable not being set during build.
+
+---
+
+### Actual Fix: Confirm Railway Variable Name
+
+In Railway, check that the variable is **exactly**:
+```
+VITE_CLERK_PUBLISHABLE_KEY
