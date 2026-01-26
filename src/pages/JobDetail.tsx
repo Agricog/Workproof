@@ -13,6 +13,7 @@ import {
   Archive,
 } from 'lucide-react'
 import { getTaskTypeConfig } from '../types/taskConfigs'
+import { trackPageView, trackError } from '../utils/analytics'
 import type { Job, Task, TaskStatus } from '../types/models'
 
 const TASK_STATUS_CONFIG: Record<TaskStatus, { label: string; color: string }> = {
@@ -32,6 +33,7 @@ export default function JobDetail() {
   const [showMenu, setShowMenu] = useState(false)
 
   useEffect(() => {
+    trackPageView(`/jobs/${jobId}`, 'Job Detail')
     loadJobData()
   }, [jobId])
 
@@ -68,6 +70,10 @@ export default function JobDetail() {
       ])
     } catch (error) {
       console.error('Failed to load job:', error)
+      trackError(
+        error instanceof Error ? error.name : 'unknown',
+        'job_detail_load'
+      )
     } finally {
       setIsLoading(false)
     }
