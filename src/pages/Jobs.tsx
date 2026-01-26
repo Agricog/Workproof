@@ -17,6 +17,7 @@ import {
   Clock,
   Archive,
 } from 'lucide-react'
+import { trackPageView, trackError } from '../utils/analytics'
 import type { Job, JobStatus } from '../types/models'
 
 const STATUS_CONFIG: Record<JobStatus, { label: string; color: string; icon: typeof Clock }> = {
@@ -33,6 +34,7 @@ export default function Jobs() {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
+    trackPageView('/jobs', 'Jobs')
     loadJobs()
   }, [])
 
@@ -88,6 +90,10 @@ export default function Jobs() {
       ])
     } catch (error) {
       console.error('Failed to load jobs:', error)
+      trackError(
+        error instanceof Error ? error.name : 'unknown',
+        'jobs_load'
+      )
     } finally {
       setIsLoading(false)
     }
