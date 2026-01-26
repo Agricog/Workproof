@@ -3,4 +3,4 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "caddy run --config /etc/caddy/Caddyfile"
+startCommand = "/app/start.sh"
