@@ -51,7 +51,7 @@ app.onError((err, c) => {
 })
 
 // Start server
-const port = parseInt(process.env.PORT || '3001')
+const port = parseInt(process.env.API_PORT || '3001')
 
 console.log(`🚀 Server running on port ${port}`)
 
