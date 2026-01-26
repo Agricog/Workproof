@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Helmet } from 'react-helmet-async'
 import { FileText, Download, Loader2 } from 'lucide-react'
-import { trackEvent } from '../utils/analytics'
+import { trackPageView, trackAuditPackGenerated, trackAuditPackDownloaded, trackError } from '../utils/analytics'
 
 interface AuditPack {
   id: string
@@ -18,46 +18,30 @@ export default function AuditPacks() {
   const [dateTo, setDateTo] = useState('')
 
   useEffect(() => {
-    trackEvent('page_view', {
-      page_name: 'audit_packs',
-      existing_packs_count: packs.length
-    })
+    trackPageView('/audit-packs', 'Audit Packs')
   }, [])
 
   const handleGenerate = async () => {
     setIsGenerating(true)
 
-    trackEvent('audit_pack_generate_start', {
-      date_from: dateFrom || 'not_set',
-      date_to: dateTo || 'not_set',
-      has_date_range: !!(dateFrom && dateTo)
-    })
-
     try {
+      // TODO: Call API to generate audit pack
       await new Promise((resolve) => setTimeout(resolve, 2000))
 
-      trackEvent('audit_pack_generate_success', {
-        date_from: dateFrom || 'not_set',
-        date_to: dateTo || 'not_set'
-      })
+      // Track successful generation (0 evidence for now, update when API returns count)
+      trackAuditPackGenerated(0)
     } catch (error) {
-      trackEvent('audit_pack_generate_error', {
-        error_type: error instanceof Error ? error.name : 'unknown'
-      })
+      trackError(
+        error instanceof Error ? error.name : 'unknown',
+        'audit_pack_generate'
+      )
     } finally {
       setIsGenerating(false)
     }
   }
 
-  const handleDownload = (pack: AuditPack) => {
-    trackEvent('audit_pack_download', {
-      pack_id: pack.id,
-      job_count: pack.jobCount,
-      evidence_count: pack.evidenceCount,
-      pack_age_days: Math.floor(
-        (Date.now() - new Date(pack.createdAt).getTime()) / (1000 * 60 * 60 * 24)
-      )
-    })
+  const handleDownload = () => {
+    trackAuditPackDownloaded()
   }
 
   return (
@@ -154,7 +138,7 @@ export default function AuditPacks() {
                     href={pack.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    onClick={() => handleDownload(pack)}
+                    onClick={handleDownload}
                     className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
                   >
                     <Download className="w-5 h-5" />
