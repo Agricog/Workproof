@@ -3,7 +3,6 @@
  * Defines required and optional evidence for each electrical task type
  * This is the "trade intelligence" that differentiates WorkProof
  */
-
 import type { TaskType, TaskTypeConfig, EvidenceType } from './models'
 
 // ============================================================================
@@ -19,48 +18,58 @@ export const EVIDENCE_TYPE_LABELS: Record<EvidenceType, string> = {
   test_meter_readings: 'Test Meter Readings',
   completed_installation: 'Completed Installation',
   certificate_photo: 'Certificate',
+
   // EICR
   db_photo: 'Distribution Board',
   sample_circuit_tests: 'Sample Circuit Tests',
   defects_found: 'Defects Found',
   test_instrument_calibration: 'Test Instrument Calibration',
+
   // General
   cable_route: 'Cable Route',
   containment: 'Containment',
   connection_points: 'Connection Points',
   labelling: 'Labelling',
+
   // Emergency Lighting
   luminaire_photo: 'Luminaire',
   battery_test_readings: 'Battery Test Readings',
   logbook_entry: 'Logbook Entry',
+
   // Fire Alarm
   panel_photo: 'Fire Alarm Panel',
   device_test_log: 'Device Test Log',
   call_point_activation: 'Call Point Activation',
+
   // EV Charger
   location_photo: 'Location',
   earthing_arrangement: 'Earthing Arrangement',
   protective_device: 'Protective Device',
   dno_notification: 'DNO Notification',
+
   // Fault Finding
   initial_fault_indication: 'Initial Fault Indication',
   investigation_photos: 'Investigation',
   resolution: 'Resolution',
   test_confirmation: 'Test Confirmation',
+
   // PAT
   equipment_photo: 'Equipment',
   label_applied: 'Label Applied',
   test_result: 'Test Result',
+
   // Smoke/CO
   location_compliance: 'Location Compliance',
   alarm_photo: 'Alarm',
   test_activation: 'Test Activation',
+
   // Solar
   array_location: 'Array Location',
   inverter: 'Inverter',
   ac_dc_isolators: 'AC/DC Isolators',
   g98_g99_submission: 'G98/G99 Submission',
   dno_acceptance: 'DNO Acceptance',
+
   // General
   before_photo: 'Before',
   after_photo: 'After',
@@ -353,32 +362,64 @@ export const TASK_TYPE_CONFIGS: Record<TaskType, TaskTypeConfig> = {
 }
 
 // ============================================================================
+// DEFAULT CONFIG FOR UNKNOWN TASK TYPES
+// ============================================================================
+
+const DEFAULT_TASK_CONFIG: TaskTypeConfig = {
+  id: 'unknown' as TaskType,
+  label: 'Unknown Task',
+  description: 'Task type not recognized',
+  niceicRelevance: 'low',
+  partPNotifiable: false,
+  requiredEvidence: ['before_photo', 'after_photo'],
+  optionalEvidence: ['additional_evidence'],
+}
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
-export function getTaskTypeConfig(taskType: TaskType): TaskTypeConfig {
-  return TASK_TYPE_CONFIGS[taskType]
+export function getTaskTypeConfig(taskType: TaskType | string): TaskTypeConfig {
+  // Return config if found, otherwise return default with the taskType as label
+  const config = TASK_TYPE_CONFIGS[taskType as TaskType]
+  if (config) {
+    return config
+  }
+  
+  // Return a default config with the task type formatted as label
+  const formattedLabel = String(taskType)
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase())
+  
+  return {
+    ...DEFAULT_TASK_CONFIG,
+    id: taskType as TaskType,
+    label: formattedLabel,
+  }
 }
 
 export function getRequiredEvidence(taskType: TaskType): EvidenceType[] {
-  return TASK_TYPE_CONFIGS[taskType].requiredEvidence
+  const config = TASK_TYPE_CONFIGS[taskType]
+  return config?.requiredEvidence || DEFAULT_TASK_CONFIG.requiredEvidence
 }
 
 export function getOptionalEvidence(taskType: TaskType): EvidenceType[] {
-  return TASK_TYPE_CONFIGS[taskType].optionalEvidence
+  const config = TASK_TYPE_CONFIGS[taskType]
+  return config?.optionalEvidence || DEFAULT_TASK_CONFIG.optionalEvidence
 }
 
 export function getAllEvidence(taskType: TaskType): EvidenceType[] {
-  const config = TASK_TYPE_CONFIGS[taskType]
+  const config = TASK_TYPE_CONFIGS[taskType] || DEFAULT_TASK_CONFIG
   return [...config.requiredEvidence, ...config.optionalEvidence]
 }
 
 export function getEvidenceLabel(evidenceType: EvidenceType): string {
-  return EVIDENCE_TYPE_LABELS[evidenceType]
+  return EVIDENCE_TYPE_LABELS[evidenceType] || String(evidenceType).replace(/_/g, ' ')
 }
 
 export function isPartPNotifiable(taskType: TaskType): boolean {
-  return TASK_TYPE_CONFIGS[taskType].partPNotifiable
+  const config = TASK_TYPE_CONFIGS[taskType]
+  return config?.partPNotifiable || false
 }
 
 export function getHighNiceicRelevanceTasks(): TaskType[] {
