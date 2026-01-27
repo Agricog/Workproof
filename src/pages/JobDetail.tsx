@@ -36,6 +36,7 @@ export default function JobDetail() {
   const { jobId } = useParams<{ jobId: string }>()
   const navigate = useNavigate()
   const { getToken } = useAuth()
+
   const [job, setJob] = useState<Job | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -59,6 +60,7 @@ export default function JobDetail() {
 
       // Fetch job details
       const jobResponse = await jobsApi.get(jobId, token)
+
       if (jobResponse.error) {
         setError(jobResponse.error)
         trackError('api_error', 'job_detail_load')
@@ -71,6 +73,7 @@ export default function JobDetail() {
 
       // Fetch tasks for this job
       const tasksResponse = await tasksApi.listByJob(jobId, token)
+
       if (tasksResponse.data) {
         setTasks(tasksResponse.data)
       }
@@ -89,6 +92,7 @@ export default function JobDetail() {
 
   const handleDeleteJob = async () => {
     if (!jobId) return
+
     if (!confirm('Are you sure you want to delete this job? This cannot be undone.')) {
       return
     }
@@ -163,10 +167,15 @@ export default function JobDetail() {
   const totalRequired = tasks.reduce((sum, t) => sum + (t.requiredEvidenceCount || 0), 0)
   const progressPercent = totalRequired > 0 ? Math.round((totalEvidence / totalRequired) * 100) : 0
 
+  // Get display values with fallbacks
+  const clientName = job.clientName || 'Unknown Client'
+  const address = job.address || 'No address'
+  const startDate = job.startDate || new Date().toISOString()
+
   return (
     <div>
       <Helmet>
-        <title>{job.clientName} | WorkProof</title>
+        <title>{clientName} | WorkProof</title>
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
 
@@ -257,18 +266,18 @@ export default function JobDetail() {
 
         {/* Job Details Card */}
         <div className="card mb-6">
-          <h1 className="text-xl font-bold text-gray-900 mb-3">{job.clientName}</h1>
+          <h1 className="text-xl font-bold text-gray-900 mb-3">{clientName}</h1>
 
           <div className="space-y-2 text-sm">
             <div className="flex items-start gap-2 text-gray-600">
               <MapPin className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
-              <span>{job.address}</span>
+              <span>{address}</span>
             </div>
             <div className="flex items-center gap-2 text-gray-600">
               <Calendar className="w-4 h-4" aria-hidden="true" />
               <span>
                 Started{' '}
-                {new Date(job.startDate).toLocaleDateString('en-GB', {
+                {new Date(startDate).toLocaleDateString('en-GB', {
                   day: 'numeric',
                   month: 'long',
                   year: 'numeric',
@@ -314,7 +323,8 @@ export default function JobDetail() {
             <div className="space-y-3" role="list" aria-label="Job tasks">
               {tasks.map((task) => {
                 const config = getTaskTypeConfig(task.taskType)
-                const statusConfig = TASK_STATUS_CONFIG[task.status]
+                const taskStatus = (task.status || 'pending') as TaskStatus
+                const statusConfig = TASK_STATUS_CONFIG[taskStatus] || TASK_STATUS_CONFIG.pending
                 const progress = task.requiredEvidenceCount
                   ? Math.round(((task.evidenceCount || 0) / task.requiredEvidenceCount) * 100)
                   : 0
@@ -345,7 +355,6 @@ export default function JobDetail() {
                       </div>
                       <ChevronRight className="w-5 h-5 text-gray-400 flex-shrink-0" aria-hidden="true" />
                     </div>
-
                     <div 
                       className="mt-3 w-full bg-gray-200 rounded-full h-1.5"
                       role="progressbar"
