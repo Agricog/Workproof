@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getSmartSuiteClient, TABLES } from '../lib/smartsuite.js'
+import { USER_FIELDS, JOB_FIELDS } from '../lib/smartsuite-fields.js'
 import { authMiddleware, getAuth } from '../middleware/auth.js'
 import { rateLimitMiddleware } from '../middleware/rateLimit.js'
 import type { Job, User, CreateJobRequest, UpdateJobRequest } from '../types/index.js'
@@ -13,7 +14,7 @@ jobs.use('*', authMiddleware)
 // Helper: Get user record ID from Clerk ID
 async function getUserRecordId(clerkId: string): Promise<string | null> {
   const client = getSmartSuiteClient()
-  const user = await client.findByField<User>(TABLES.USERS, 'clerk_id', clerkId)
+  const user = await client.findByField<User>(TABLES.USERS, USER_FIELDS.clerk_id, clerkId)
   return user?.id || null
 }
 
@@ -24,7 +25,6 @@ jobs.get('/', async (c) => {
 
   try {
     const userRecordId = await getUserRecordId(auth.userId)
-
     if (!userRecordId) {
       return c.json({ error: 'User not found' }, 404)
     }
@@ -34,13 +34,13 @@ jobs.get('/', async (c) => {
     const limit = parseInt(c.req.query('limit') || '50')
     const offset = parseInt(c.req.query('offset') || '0')
 
-    // Build filter
+    // Build filter using field IDs
     const filterFields: Array<{ field: string; comparison: string; value: unknown }> = [
-      { field: 'user', comparison: 'is', value: userRecordId }
+      { field: JOB_FIELDS.user, comparison: 'is', value: userRecordId }
     ]
 
     if (status) {
-      filterFields.push({ field: 'status', comparison: 'is', value: status })
+      filterFields.push({ field: JOB_FIELDS.status, comparison: 'is', value: status })
     }
 
     const result = await client.listRecords<Job>(TABLES.JOBS, {
@@ -48,7 +48,7 @@ jobs.get('/', async (c) => {
         operator: 'and',
         fields: filterFields
       },
-      sort: [{ field: 'created_at', direction: 'desc' }],
+      sort: [{ field: JOB_FIELDS.created_at, direction: 'desc' }],
       limit,
       offset
     })
@@ -74,9 +74,11 @@ jobs.get('/:id', async (c) => {
   try {
     const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
 
-    // Verify ownership
+    // Verify ownership - check using field ID
     const userRecordId = await getUserRecordId(auth.userId)
-    if (job.user !== userRecordId) {
+    const jobUserId = job[JOB_FIELDS.user as keyof Job]
+    
+    if (jobUserId !== userRecordId) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
@@ -94,36 +96,43 @@ jobs.post('/', async (c) => {
 
   try {
     const userRecordId = await getUserRecordId(auth.userId)
-
     if (!userRecordId) {
       return c.json({ error: 'User not found' }, 404)
     }
 
     const body = await c.req.json() as CreateJobRequest
 
-    // Validate required fields
-    const requiredFields = ['title', 'address', 'postcode', 'client_name', 'start_date']
-    for (const field of requiredFields) {
-      if (!body[field as keyof CreateJobRequest]) {
-        return c.json({ error: `Missing required field: ${field}` }, 400)
-      }
+    // Validate required fields (using request field names)
+    if (!body.address) {
+      return c.json({ error: 'Missing required field: address' }, 400)
+    }
+    if (!body.clientName && !body.client_name) {
+      return c.json({ error: 'Missing required field: client_name' }, 400)
     }
 
-    // Create job with defaults
-    const jobData: Omit<Job, 'id'> = {
-      user: userRecordId,
-      title: body.title,
-      address: body.address,
-      postcode: body.postcode.toUpperCase(),
-      client_name: body.client_name,
-      client_phone: body.client_phone || undefined,
-      client_email: body.client_email || undefined,
-      status: 'draft',
-      start_date: body.start_date,
-      notes: body.notes || undefined
+    // Create job with SmartSuite field IDs
+    const jobData: Record<string, unknown> = {
+      title: body.title || `${body.clientName || body.client_name} - ${body.address}`,
+      [JOB_FIELDS.user]: userRecordId,
+      [JOB_FIELDS.address]: body.address,
+      [JOB_FIELDS.postcode]: body.postcode?.toUpperCase() || '',
+      [JOB_FIELDS.client_name]: body.clientName || body.client_name,
+      [JOB_FIELDS.status]: 'active',
+      [JOB_FIELDS.start_date]: body.startDate || body.start_date || new Date().toISOString().split('T')[0]
     }
 
-    const job = await client.createRecord<Job>(TABLES.JOBS, jobData)
+    // Add optional fields if provided
+    if (body.client_phone || body.clientPhone) {
+      jobData[JOB_FIELDS.client_phone] = body.client_phone || body.clientPhone
+    }
+    if (body.client_email || body.clientEmail) {
+      jobData[JOB_FIELDS.client_email] = body.client_email || body.clientEmail
+    }
+    if (body.notes) {
+      jobData[JOB_FIELDS.notes] = body.notes
+    }
+
+    const job = await client.createRecord<Job>(TABLES.JOBS, jobData as Omit<Job, 'id'>)
 
     return c.json(job, 201)
   } catch (error) {
@@ -141,38 +150,43 @@ jobs.patch('/:id', async (c) => {
   try {
     // Get existing job and verify ownership
     const existingJob = await client.getRecord<Job>(TABLES.JOBS, jobId)
-
     const userRecordId = await getUserRecordId(auth.userId)
-    if (existingJob.user !== userRecordId) {
+    
+    const jobUserId = existingJob[JOB_FIELDS.user as keyof Job]
+    if (jobUserId !== userRecordId) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
     const body = await c.req.json() as UpdateJobRequest
 
-    // Only allow updating specific fields
-    const allowedFields = [
-      'title',
-      'address',
-      'postcode',
-      'client_name',
-      'client_phone',
-      'client_email',
-      'status',
-      'completion_date',
-      'notes'
-    ]
+    // Map request fields to SmartSuite field IDs
+    const fieldMapping: Record<string, string> = {
+      title: 'title',
+      address: JOB_FIELDS.address,
+      postcode: JOB_FIELDS.postcode,
+      client_name: JOB_FIELDS.client_name,
+      clientName: JOB_FIELDS.client_name,
+      client_phone: JOB_FIELDS.client_phone,
+      clientPhone: JOB_FIELDS.client_phone,
+      client_email: JOB_FIELDS.client_email,
+      clientEmail: JOB_FIELDS.client_email,
+      status: JOB_FIELDS.status,
+      completion_date: JOB_FIELDS.completion_date,
+      completionDate: JOB_FIELDS.completion_date,
+      notes: JOB_FIELDS.notes
+    }
 
-    const updateData: Partial<Job> = {}
-    for (const field of allowedFields) {
-      if (body[field as keyof UpdateJobRequest] !== undefined) {
-        let value = body[field as keyof UpdateJobRequest]
-        
+    const updateData: Record<string, unknown> = {}
+    
+    for (const [requestField, smartsuiteField] of Object.entries(fieldMapping)) {
+      const value = body[requestField as keyof UpdateJobRequest]
+      if (value !== undefined) {
         // Uppercase postcode
-        if (field === 'postcode' && typeof value === 'string') {
-          value = value.toUpperCase()
+        if (requestField === 'postcode' && typeof value === 'string') {
+          updateData[smartsuiteField] = value.toUpperCase()
+        } else {
+          updateData[smartsuiteField] = value
         }
-        
-        updateData[field as keyof Job] = value
       }
     }
 
@@ -183,7 +197,73 @@ jobs.patch('/:id', async (c) => {
     const updatedJob = await client.updateRecord<Job>(
       TABLES.JOBS,
       jobId,
-      updateData
+      updateData as Partial<Job>
+    )
+
+    return c.json(updatedJob)
+  } catch (error) {
+    console.error('Error updating job:', error)
+    return c.json({ error: 'Failed to update job' }, 500)
+  }
+})
+
+// Also support PUT for updates
+jobs.put('/:id', async (c) => {
+  const auth = getAuth(c)
+  const jobId = c.req.param('id')
+  const client = getSmartSuiteClient()
+
+  try {
+    // Get existing job and verify ownership
+    const existingJob = await client.getRecord<Job>(TABLES.JOBS, jobId)
+    const userRecordId = await getUserRecordId(auth.userId)
+    
+    const jobUserId = existingJob[JOB_FIELDS.user as keyof Job]
+    if (jobUserId !== userRecordId) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
+
+    const body = await c.req.json() as UpdateJobRequest
+
+    // Map request fields to SmartSuite field IDs
+    const fieldMapping: Record<string, string> = {
+      title: 'title',
+      address: JOB_FIELDS.address,
+      postcode: JOB_FIELDS.postcode,
+      client_name: JOB_FIELDS.client_name,
+      clientName: JOB_FIELDS.client_name,
+      client_phone: JOB_FIELDS.client_phone,
+      clientPhone: JOB_FIELDS.client_phone,
+      client_email: JOB_FIELDS.client_email,
+      clientEmail: JOB_FIELDS.client_email,
+      status: JOB_FIELDS.status,
+      completion_date: JOB_FIELDS.completion_date,
+      completionDate: JOB_FIELDS.completion_date,
+      notes: JOB_FIELDS.notes
+    }
+
+    const updateData: Record<string, unknown> = {}
+    
+    for (const [requestField, smartsuiteField] of Object.entries(fieldMapping)) {
+      const value = body[requestField as keyof UpdateJobRequest]
+      if (value !== undefined) {
+        // Uppercase postcode
+        if (requestField === 'postcode' && typeof value === 'string') {
+          updateData[smartsuiteField] = value.toUpperCase()
+        } else {
+          updateData[smartsuiteField] = value
+        }
+      }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return c.json({ error: 'No valid fields to update' }, 400)
+    }
+
+    const updatedJob = await client.updateRecord<Job>(
+      TABLES.JOBS,
+      jobId,
+      updateData as Partial<Job>
     )
 
     return c.json(updatedJob)
@@ -202,16 +282,17 @@ jobs.delete('/:id', async (c) => {
   try {
     // Get existing job and verify ownership
     const existingJob = await client.getRecord<Job>(TABLES.JOBS, jobId)
-
     const userRecordId = await getUserRecordId(auth.userId)
-    if (existingJob.user !== userRecordId) {
+    
+    const jobUserId = existingJob[JOB_FIELDS.user as keyof Job]
+    if (jobUserId !== userRecordId) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
     // Soft delete by setting status to archived
     await client.updateRecord<Job>(TABLES.JOBS, jobId, {
-      status: 'archived'
-    })
+      [JOB_FIELDS.status]: 'archived'
+    } as Partial<Job>)
 
     return c.json({ success: true })
   } catch (error) {
