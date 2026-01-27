@@ -41,14 +41,12 @@ export default function Layout({ children }: LayoutProps) {
       >
         Skip to main content
       </a>
-
       <main id="main-content" className="flex-1 pb-20" tabIndex={-1}>
         <div className="max-w-lg mx-auto px-4 py-6">{children}</div>
       </main>
-
       <Navigation />
-
       <div className="safe-area-bottom" />
     </div>
   )
 }
+
