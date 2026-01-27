@@ -2,6 +2,12 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
+# Build argument for Clerk
+ARG VITE_CLERK_PUBLISHABLE_KEY
+
+# Set as environment variable for build
+ENV VITE_CLERK_PUBLISHABLE_KEY=$VITE_CLERK_PUBLISHABLE_KEY
+
 # Copy package files
 COPY package*.json ./
 
