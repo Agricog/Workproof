@@ -4,12 +4,22 @@ import { useAuth } from '@clerk/clerk-react'
 import { FileText, Download, Loader2, AlertCircle, RefreshCw } from 'lucide-react'
 import { trackPageView, trackAuditPackGenerated, trackAuditPackDownloaded, trackError } from '../utils/analytics'
 import { captureError } from '../utils/errorTracking'
-import { auditPacksApi, jobsApi } from '../services/api'
-import type { AuditPack, Job } from '../types/models'
+import { auditPackApi, jobsApi } from '../services/api'
+import type { Job } from '../types/models'
+
+// API response shape for audit packs
+interface AuditPackResponse {
+  id: string
+  job_id: string
+  generated_at: string
+  pdf_url?: string
+  evidence_count: number
+  hash: string
+}
 
 export default function AuditPacks() {
   const { getToken } = useAuth()
-  const [packs, setPacks] = useState<AuditPack[]>([])
+  const [packs, setPacks] = useState<AuditPackResponse[]>([])
   const [jobs, setJobs] = useState<Job[]>([])
   const [selectedJobId, setSelectedJobId] = useState<string>('')
   const [isLoading, setIsLoading] = useState(true)
@@ -36,15 +46,12 @@ export default function AuditPacks() {
         setJobs(jobsResponse.data)
         // Auto-select first job if available
         if (jobsResponse.data.length > 0 && !selectedJobId) {
-          setSelectedJobId(jobsResponse.data[0].id)
-        }
-      }
-
-      // Load existing audit packs if a job is selected
-      if (selectedJobId) {
-        const packsResponse = await auditPacksApi.listByJob(selectedJobId, token)
-        if (packsResponse.data) {
-          setPacks(packsResponse.data)
+          const firstJobId = jobsResponse.data[0]?.id
+          if (firstJobId) {
+            setSelectedJobId(firstJobId)
+            // Load packs for first job
+            await loadPacksForJob(firstJobId, token)
+          }
         }
       }
     } catch (err) {
@@ -60,12 +67,12 @@ export default function AuditPacks() {
     }
   }
 
-  const loadPacksForJob = async (jobId: string) => {
+  const loadPacksForJob = async (jobId: string, token?: string | null) => {
     if (!jobId) return
 
     try {
-      const token = await getToken()
-      const packsResponse = await auditPacksApi.listByJob(jobId, token)
+      const authToken = token || await getToken()
+      const packsResponse = await auditPackApi.listByJob(jobId, authToken)
       if (packsResponse.data) {
         setPacks(packsResponse.data)
       }
@@ -74,9 +81,13 @@ export default function AuditPacks() {
     }
   }
 
-  const handleJobChange = (jobId: string) => {
+  const handleJobChange = async (jobId: string) => {
     setSelectedJobId(jobId)
-    loadPacksForJob(jobId)
+    if (jobId) {
+      await loadPacksForJob(jobId)
+    } else {
+      setPacks([])
+    }
   }
 
   const handleGenerate = async () => {
@@ -91,14 +102,7 @@ export default function AuditPacks() {
     try {
       const token = await getToken()
 
-      const response = await auditPacksApi.generate(
-        selectedJobId,
-        {
-          dateFrom: dateFrom || undefined,
-          dateTo: dateTo || undefined,
-        },
-        token
-      )
+      const response = await auditPackApi.generate(selectedJobId, token)
 
       if (response.error) {
         setError(response.error)
@@ -109,7 +113,7 @@ export default function AuditPacks() {
       if (response.data) {
         // Add new pack to list
         setPacks((prev) => [response.data!, ...prev])
-        trackAuditPackGenerated(response.data.evidenceCount || 0)
+        trackAuditPackGenerated(response.data.evidence_count || 0)
       }
     } catch (err) {
       const errorMessage = 'Failed to generate audit pack. Please try again.'
@@ -124,7 +128,7 @@ export default function AuditPacks() {
     }
   }
 
-  const handleDownload = (pack: AuditPack) => {
+  const handleDownload = () => {
     trackAuditPackDownloaded()
     // URL will open in new tab via the anchor tag
   }
@@ -263,24 +267,24 @@ export default function AuditPacks() {
                 >
                   <div>
                     <p className="font-medium text-gray-900">
-                      {new Date(pack.createdAt).toLocaleDateString('en-GB', {
+                      {new Date(pack.generated_at).toLocaleDateString('en-GB', {
                         day: 'numeric',
                         month: 'long',
                         year: 'numeric',
                       })}
                     </p>
                     <p className="text-sm text-gray-500">
-                      {pack.evidenceCount || 0} evidence items
+                      {pack.evidence_count || 0} evidence items
                     </p>
                   </div>
-                  {pack.url && (
+                  {pack.pdf_url && (
                     <a
-                      href={pack.url}
+                      href={pack.pdf_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      onClick={() => handleDownload(pack)}
+                      onClick={handleDownload}
                       className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                      aria-label={`Download audit pack from ${new Date(pack.createdAt).toLocaleDateString('en-GB')}`}
+                      aria-label={`Download audit pack from ${new Date(pack.generated_at).toLocaleDateString('en-GB')}`}
                     >
                       <Download className="w-5 h-5" />
                     </a>
