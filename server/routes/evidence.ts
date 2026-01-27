@@ -1,8 +1,9 @@
 import { Hono } from 'hono'
 import { getSmartSuiteClient, TABLES } from '../lib/smartsuite.js'
+import { USER_FIELDS, TASK_FIELDS, EVIDENCE_FIELDS } from '../lib/smartsuite-fields.js'
 import { authMiddleware, getAuth } from '../middleware/auth.js'
-import { rateLimitMiddleware, strictRateLimitMiddleware } from '../middleware/rateLimit.js'
-import type { Evidence, Task, Job, User, CreateEvidenceRequest } from '../types/index.js'
+import { rateLimitMiddleware } from '../middleware/rateLimit.js'
+import type { Evidence, Task, User } from '../types/index.js'
 
 const evidence = new Hono()
 
@@ -13,11 +14,19 @@ evidence.use('*', authMiddleware)
 // Helper: Get user record ID from Clerk ID
 async function getUserRecordId(clerkId: string): Promise<string | null> {
   const client = getSmartSuiteClient()
-  const user = await client.findByField<User>(TABLES.USERS, 'clerk_id', clerkId)
+  const user = await client.findByField<User>(TABLES.USERS, USER_FIELDS.clerk_id, clerkId)
   return user?.id || null
 }
 
-// Helper: Verify user owns the task (through job)
+// Helper: Check if evidence belongs to task
+function evidenceBelongsToTask(evidence: Record<string, unknown>, taskId: string): boolean {
+  const evidenceTaskIds = evidence[EVIDENCE_FIELDS.task] as string[] | string | undefined
+  if (!evidenceTaskIds) return false
+  const taskIds = Array.isArray(evidenceTaskIds) ? evidenceTaskIds : [evidenceTaskIds]
+  return taskIds.includes(taskId)
+}
+
+// Helper: Verify user owns the task (through job ownership)
 async function verifyTaskOwnership(taskId: string, clerkId: string): Promise<boolean> {
   const client = getSmartSuiteClient()
   const userRecordId = await getUserRecordId(clerkId)
@@ -25,19 +34,55 @@ async function verifyTaskOwnership(taskId: string, clerkId: string): Promise<boo
   if (!userRecordId) return false
 
   try {
+    // Get task to find job
     const task = await client.getRecord<Task>(TABLES.TASKS, taskId)
-    const job = await client.getRecord<Job>(TABLES.JOBS, task.job)
-    return job.user === userRecordId
+    const taskJobIds = task[TASK_FIELDS.job as keyof Task] as string[] | string
+    const jobId = Array.isArray(taskJobIds) ? taskJobIds[0] : taskJobIds
+
+    if (!jobId) return false
+
+    // Get job to verify ownership
+    const job = await client.getRecord<Record<string, unknown>>(TABLES.JOBS, jobId)
+    const jobUserIds = job['s11e8c3905'] as string[] | string | undefined // JOB_FIELDS.user
+    if (!jobUserIds) return false
+    
+    const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
+    return userIds.includes(userRecordId)
   } catch {
     return false
   }
 }
 
+// Helper: Transform SmartSuite evidence record to readable format
+function transformEvidence(record: Record<string, unknown>): Record<string, unknown> {
+  // Task field may be array (linked record)
+  const taskValue = record[EVIDENCE_FIELDS.task] as string[] | string | undefined
+  const taskId = Array.isArray(taskValue) ? taskValue[0] : taskValue
+
+  return {
+    id: record.id,
+    taskId: taskId || '',
+    evidenceType: record[EVIDENCE_FIELDS.evidence_type] || 'unknown',
+    photoUrl: record[EVIDENCE_FIELDS.photo_url] || '',
+    photoHash: record[EVIDENCE_FIELDS.photo_hash] || '',
+    latitude: record[EVIDENCE_FIELDS.latitude],
+    longitude: record[EVIDENCE_FIELDS.longitude],
+    gpsAccuracy: record[EVIDENCE_FIELDS.gps_accuracy],
+    capturedAt: record[EVIDENCE_FIELDS.captured_at],
+    syncedAt: record[EVIDENCE_FIELDS.synced_at],
+    isSynced: record[EVIDENCE_FIELDS.is_synced] || false
+  }
+}
+
 // List evidence for a task
-evidence.get('/task/:taskId', async (c) => {
+evidence.get('/', async (c) => {
   const auth = getAuth(c)
-  const taskId = c.req.param('taskId')
+  const taskId = c.req.query('task_id')
   const client = getSmartSuiteClient()
+
+  if (!taskId) {
+    return c.json({ error: 'Missing task_id parameter' }, 400)
+  }
 
   try {
     // Verify ownership
@@ -46,17 +91,24 @@ evidence.get('/task/:taskId', async (c) => {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
+    // Fetch all evidence and filter in memory (SmartSuite linked record limitation)
     const result = await client.listRecords<Evidence>(TABLES.EVIDENCE, {
-      filter: {
-        operator: 'and',
-        fields: [{ field: 'task', comparison: 'is', value: taskId }]
-      },
-      sort: [{ field: 'captured_at', direction: 'asc' }]
+      limit: 200
     })
 
+    // Filter by task ID in memory
+    const filteredItems = result.items.filter(item =>
+      evidenceBelongsToTask(item as unknown as Record<string, unknown>, taskId)
+    )
+
+    // Transform each evidence to readable format
+    const transformedItems = filteredItems.map(item =>
+      transformEvidence(item as unknown as Record<string, unknown>)
+    )
+
     return c.json({
-      items: result.items,
-      total: result.total
+      items: transformedItems,
+      total: transformedItems.length
     })
   } catch (error) {
     console.error('Error listing evidence:', error)
@@ -73,119 +125,51 @@ evidence.get('/:id', async (c) => {
   try {
     const evidenceRecord = await client.getRecord<Evidence>(TABLES.EVIDENCE, evidenceId)
 
+    // Get task ID from evidence
+    const evidenceTaskIds = evidenceRecord[EVIDENCE_FIELDS.task as keyof Evidence] as string[] | string
+    const taskId = Array.isArray(evidenceTaskIds) ? evidenceTaskIds[0] : evidenceTaskIds
+
     // Verify ownership through task
-    const isOwner = await verifyTaskOwnership(evidenceRecord.task, auth.userId)
+    const isOwner = await verifyTaskOwnership(taskId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    return c.json(evidenceRecord)
+    // Transform to readable format
+    const transformed = transformEvidence(evidenceRecord as unknown as Record<string, unknown>)
+
+    return c.json(transformed)
   } catch (error) {
     console.error('Error fetching evidence:', error)
     return c.json({ error: 'Failed to fetch evidence' }, 500)
   }
 })
 
-// Create evidence record (after photo uploaded to R2)
-evidence.post('/', async (c) => {
-  const auth = getAuth(c)
-  const client = getSmartSuiteClient()
-
-  try {
-    const body = await c.req.json() as CreateEvidenceRequest
-
-    // Validate required fields
-    const requiredFields = ['task', 'evidence_type', 'photo_url', 'photo_hash', 'captured_at']
-    for (const field of requiredFields) {
-      if (!body[field as keyof CreateEvidenceRequest]) {
-        return c.json({ error: `Missing required field: ${field}` }, 400)
-      }
-    }
-
-    // Verify ownership
-    const isOwner = await verifyTaskOwnership(body.task, auth.userId)
-    if (!isOwner) {
-      return c.json({ error: 'Forbidden' }, 403)
-    }
-
-    // Create evidence record
-    const evidenceData: Omit<Evidence, 'id'> = {
-      task: body.task,
-      evidence_type: body.evidence_type,
-      photo_url: body.photo_url,
-      photo_hash: body.photo_hash,
-      latitude: body.latitude,
-      longitude: body.longitude,
-      gps_accuracy: body.gps_accuracy,
-      captured_at: body.captured_at,
-      synced_at: new Date().toISOString(),
-      is_synced: true,
-      notes: body.notes
-    }
-
-    const evidenceRecord = await client.createRecord<Evidence>(TABLES.EVIDENCE, evidenceData)
-
-    return c.json(evidenceRecord, 201)
-  } catch (error) {
-    console.error('Error creating evidence:', error)
-    return c.json({ error: 'Failed to create evidence' }, 500)
-  }
-})
-
-// Generate R2 upload URL (strict rate limit)
-evidence.post('/upload-url', strictRateLimitMiddleware, async (c) => {
+// Get signed upload URL for R2
+evidence.post('/upload-url', async (c) => {
   const auth = getAuth(c)
 
   try {
-    const body = await c.req.json() as { 
-      taskId: string
-      filename: string
-      contentType: string 
-    }
+    const body = await c.req.json() as Record<string, unknown>
+    const filename = body.filename as string
+    const contentType = (body.content_type || body.contentType || 'image/jpeg') as string
 
-    if (!body.taskId || !body.filename || !body.contentType) {
-      return c.json({ error: 'Missing required fields: taskId, filename, contentType' }, 400)
-    }
-
-    // Validate content type
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp']
-    if (!allowedTypes.includes(body.contentType)) {
-      return c.json({ error: 'Invalid file type. Allowed: JPEG, PNG, WebP' }, 400)
-    }
-
-    // Verify ownership
-    const isOwner = await verifyTaskOwnership(body.taskId, auth.userId)
-    if (!isOwner) {
-      return c.json({ error: 'Forbidden' }, 403)
+    if (!filename) {
+      return c.json({ error: 'Missing filename' }, 400)
     }
 
     // Generate unique key
     const timestamp = Date.now()
-    const sanitizedFilename = body.filename.replace(/[^a-zA-Z0-9.-]/g, '_')
-    const key = `evidence/${auth.userId}/${body.taskId}/${timestamp}-${sanitizedFilename}`
+    const key = `evidence/${auth.userId}/${timestamp}-${filename}`
 
-    // Generate signed upload URL using R2
-    const r2AccountId = process.env.R2_ACCOUNT_ID
-    const r2AccessKeyId = process.env.R2_ACCESS_KEY_ID
-    const r2SecretAccessKey = process.env.R2_SECRET_ACCESS_KEY
-    const r2BucketName = process.env.R2_BUCKET_NAME
-
-    if (!r2AccountId || !r2AccessKeyId || !r2SecretAccessKey || !r2BucketName) {
-      console.error('R2 credentials not configured')
-      return c.json({ error: 'Storage not configured' }, 500)
-    }
-
-    // For R2, we'll use a simple approach: return the key and let frontend upload via presigned URL
-    // In production, you'd use AWS SDK v3 with R2 endpoint to generate presigned URLs
+    // For now, return a placeholder URL
+    // In production, this would generate a signed R2 upload URL
+    const r2PublicUrl = process.env.R2_PUBLIC_URL || 'https://workproof-evidence.r2.cloudflarestorage.com'
     
-    const uploadUrl = `https://${r2AccountId}.r2.cloudflarestorage.com/${r2BucketName}/${key}`
-    const publicUrl = `https://${process.env.R2_PUBLIC_DOMAIN || r2BucketName + '.r2.dev'}/${key}`
-
     return c.json({
-      uploadUrl,
-      publicUrl,
-      key,
-      expiresIn: 300 // 5 minutes
+      upload_url: `${r2PublicUrl}/${key}`,
+      photo_url: `${r2PublicUrl}/${key}`,
+      key
     })
   } catch (error) {
     console.error('Error generating upload URL:', error)
@@ -193,44 +177,67 @@ evidence.post('/upload-url', strictRateLimitMiddleware, async (c) => {
   }
 })
 
-// Update evidence
-evidence.patch('/:id', async (c) => {
+// Create new evidence record
+evidence.post('/', async (c) => {
   const auth = getAuth(c)
-  const evidenceId = c.req.param('id')
   const client = getSmartSuiteClient()
 
   try {
-    // Get existing evidence
-    const existingEvidence = await client.getRecord<Evidence>(TABLES.EVIDENCE, evidenceId)
+    const body = await c.req.json() as Record<string, unknown>
+
+    // Support both formats
+    const taskId = (body.task_id || body.taskId) as string
+    const evidenceType = (body.evidence_type || body.evidenceType) as string
+    const photoUrl = (body.photo_url || body.photoUrl) as string
+    const photoHash = (body.photo_hash || body.photoHash) as string
+
+    // Validate required fields
+    if (!taskId || !evidenceType || !photoUrl) {
+      return c.json({ error: 'Missing required fields: task_id, evidence_type, photo_url' }, 400)
+    }
 
     // Verify ownership
-    const isOwner = await verifyTaskOwnership(existingEvidence.task, auth.userId)
+    const isOwner = await verifyTaskOwnership(taskId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    const body = await c.req.json()
-
-    // Only allow updating notes
-    const updateData: Partial<Evidence> = {}
-    if (body.notes !== undefined) {
-      updateData.notes = body.notes
+    // Create evidence with SmartSuite field IDs
+    const evidenceData: Record<string, unknown> = {
+      title: `${evidenceType} - ${Date.now()}`,
+      [EVIDENCE_FIELDS.task]: [taskId],
+      [EVIDENCE_FIELDS.evidence_type]: evidenceType,
+      [EVIDENCE_FIELDS.photo_url]: photoUrl,
+      [EVIDENCE_FIELDS.photo_hash]: photoHash || '',
+      [EVIDENCE_FIELDS.captured_at]: (body.captured_at || body.capturedAt) as string || new Date().toISOString(),
+      [EVIDENCE_FIELDS.synced_at]: new Date().toISOString(),
+      [EVIDENCE_FIELDS.is_synced]: true
     }
 
-    if (Object.keys(updateData).length === 0) {
-      return c.json({ error: 'No valid fields to update' }, 400)
+    // Add optional GPS fields
+    const latitude = body.latitude as number | undefined
+    const longitude = body.longitude as number | undefined
+    const gpsAccuracy = (body.gps_accuracy || body.gpsAccuracy) as number | undefined
+
+    if (latitude !== undefined && latitude !== null) {
+      evidenceData[EVIDENCE_FIELDS.latitude] = latitude
+    }
+    if (longitude !== undefined && longitude !== null) {
+      evidenceData[EVIDENCE_FIELDS.longitude] = longitude
+    }
+    if (gpsAccuracy !== undefined && gpsAccuracy !== null) {
+      evidenceData[EVIDENCE_FIELDS.gps_accuracy] = gpsAccuracy
     }
 
-    const updatedEvidence = await client.updateRecord<Evidence>(
-      TABLES.EVIDENCE,
-      evidenceId,
-      updateData
-    )
+    const created = await client.createRecord<Evidence>(TABLES.EVIDENCE, evidenceData as Omit<Evidence, 'id'>)
 
-    return c.json(updatedEvidence)
+    // Transform to readable format
+    const transformed = transformEvidence(created as unknown as Record<string, unknown>)
+
+    return c.json(transformed, 201)
   } catch (error) {
-    console.error('Error updating evidence:', error)
-    return c.json({ error: 'Failed to update evidence' }, 500)
+    console.error('Error creating evidence:', error)
+    return c.json({ error: 'Failed to create evidence' }, 500)
   }
 })
 
@@ -244,73 +251,22 @@ evidence.delete('/:id', async (c) => {
     // Get existing evidence
     const existingEvidence = await client.getRecord<Evidence>(TABLES.EVIDENCE, evidenceId)
 
-    // Verify ownership
-    const isOwner = await verifyTaskOwnership(existingEvidence.task, auth.userId)
+    // Get task ID from evidence
+    const evidenceTaskIds = existingEvidence[EVIDENCE_FIELDS.task as keyof Evidence] as string[] | string
+    const taskId = Array.isArray(evidenceTaskIds) ? evidenceTaskIds[0] : evidenceTaskIds
+
+    // Verify ownership through task
+    const isOwner = await verifyTaskOwnership(taskId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
     await client.deleteRecord(TABLES.EVIDENCE, evidenceId)
 
-    // Note: R2 file deletion would be handled separately (cleanup job)
-
     return c.json({ success: true })
   } catch (error) {
     console.error('Error deleting evidence:', error)
     return c.json({ error: 'Failed to delete evidence' }, 500)
-  }
-})
-
-// Bulk sync evidence (for offline-captured photos)
-evidence.post('/sync', async (c) => {
-  const auth = getAuth(c)
-  const client = getSmartSuiteClient()
-
-  try {
-    const body = await c.req.json() as { items: CreateEvidenceRequest[] }
-
-    if (!body.items || !Array.isArray(body.items) || body.items.length === 0) {
-      return c.json({ error: 'Missing items array' }, 400)
-    }
-
-    // Limit batch size
-    if (body.items.length > 50) {
-      return c.json({ error: 'Maximum 50 items per sync' }, 400)
-    }
-
-    // Verify ownership for all tasks
-    const taskIds = [...new Set(body.items.map(item => item.task))]
-    for (const taskId of taskIds) {
-      const isOwner = await verifyTaskOwnership(taskId, auth.userId)
-      if (!isOwner) {
-        return c.json({ error: `Forbidden: invalid task ${taskId}` }, 403)
-      }
-    }
-
-    // Create all evidence records
-    const evidenceRecords = body.items.map(item => ({
-      task: item.task,
-      evidence_type: item.evidence_type,
-      photo_url: item.photo_url,
-      photo_hash: item.photo_hash,
-      latitude: item.latitude,
-      longitude: item.longitude,
-      gps_accuracy: item.gps_accuracy,
-      captured_at: item.captured_at,
-      synced_at: new Date().toISOString(),
-      is_synced: true,
-      notes: item.notes
-    }))
-
-    const created = await client.bulkCreate<Evidence>(TABLES.EVIDENCE, evidenceRecords)
-
-    return c.json({ 
-      items: created,
-      synced: created.length 
-    }, 201)
-  } catch (error) {
-    console.error('Error syncing evidence:', error)
-    return c.json({ error: 'Failed to sync evidence' }, 500)
   }
 })
 
