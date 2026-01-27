@@ -62,6 +62,7 @@ export default function Login() {
               path="/login"
               signUpUrl="/login"
               fallbackRedirectUrl="/dashboard"
+              signUpFallbackRedirectUrl="/dashboard"
             />
 
             {/* Back link */}
