@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Helmet } from 'react-helmet-async'
+import { useAuth } from '@clerk/clerk-react'
 import {
   User,
   Bell,
@@ -25,6 +26,7 @@ interface SettingsLink {
 }
 
 export default function Settings() {
+  const { getToken } = useAuth()
   const [storageUsed, setStorageUsed] = useState(0)
   const [storageQuota, setStorageQuota] = useState(0)
   const [pendingSync, setPendingSync] = useState(0)
@@ -50,9 +52,11 @@ export default function Settings() {
   const handleSync = async () => {
     setIsSyncing(true)
     try {
-      await forceSyncNow()
+      const result = await forceSyncNow(getToken)
       await loadSyncStatus()
-      trackEvidenceSynced(pendingSync)
+      if (result.synced > 0) {
+        trackEvidenceSynced(result.synced)
+      }
     } finally {
       setIsSyncing(false)
     }
@@ -135,6 +139,7 @@ export default function Settings() {
         <h1 className="text-2xl font-bold text-gray-900 mb-6">Settings</h1>
 
         <div className="space-y-6">
+          {/* Storage Section */}
           <div className="card">
             <h2 className="font-semibold text-gray-900 mb-4">Storage</h2>
 
@@ -145,7 +150,14 @@ export default function Settings() {
                   {formatBytes(storageUsed)} / {formatBytes(storageQuota)}
                 </span>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
+              <div 
+                className="w-full bg-gray-200 rounded-full h-2"
+                role="progressbar"
+                aria-valuenow={storagePercent}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Storage usage"
+              >
                 <div
                   className={`h-2 rounded-full transition-all ${
                     storagePercent > 80 ? 'bg-red-500' : 'bg-green-600'
@@ -177,11 +189,12 @@ export default function Settings() {
               disabled={isClearing}
               className="w-full flex items-center justify-center gap-2 p-3 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
             >
-              <Trash2 className="w-5 h-5" />
+              <Trash2 className="w-5 h-5" aria-hidden="true" />
               <span>{isClearing ? 'Clearing...' : 'Clear Local Data'}</span>
             </button>
           </div>
 
+          {/* Account Section */}
           <div className="card">
             <h2 className="font-semibold text-gray-900 mb-4">Account</h2>
             <div className="space-y-1">
@@ -192,18 +205,19 @@ export default function Settings() {
                   className="w-full flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg transition-colors"
                 >
                   <div className="flex items-center gap-3">
-                    <item.icon className="w-5 h-5 text-gray-400" />
+                    <item.icon className="w-5 h-5 text-gray-400" aria-hidden="true" />
                     <div className="text-left">
                       <p className="font-medium text-gray-900">{item.label}</p>
                       <p className="text-sm text-gray-500">{item.description}</p>
                     </div>
                   </div>
-                  <ChevronRight className="w-5 h-5 text-gray-400" />
+                  <ChevronRight className="w-5 h-5 text-gray-400" aria-hidden="true" />
                 </button>
               ))}
             </div>
           </div>
 
+          {/* Support Section */}
           <div className="card">
             <h2 className="font-semibold text-gray-900 mb-4">Support</h2>
             <div className="space-y-1">
@@ -214,22 +228,23 @@ export default function Settings() {
                   className="w-full flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg transition-colors"
                 >
                   <div className="flex items-center gap-3">
-                    <item.icon className="w-5 h-5 text-gray-400" />
+                    <item.icon className="w-5 h-5 text-gray-400" aria-hidden="true" />
                     <div className="text-left">
                       <p className="font-medium text-gray-900">{item.label}</p>
                       <p className="text-sm text-gray-500">{item.description}</p>
                     </div>
                   </div>
                   {item.external ? (
-                    <ExternalLink className="w-5 h-5 text-gray-400" />
+                    <ExternalLink className="w-5 h-5 text-gray-400" aria-hidden="true" />
                   ) : (
-                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                    <ChevronRight className="w-5 h-5 text-gray-400" aria-hidden="true" />
                   )}
                 </button>
               ))}
             </div>
           </div>
 
+          {/* Version Info */}
           <div className="text-center text-sm text-gray-500 py-4">
             <p>WorkProof v1.0.0</p>
             <p className="mt-1">© 2026 WorkProof. All rights reserved.</p>
