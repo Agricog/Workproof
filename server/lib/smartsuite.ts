@@ -90,15 +90,12 @@ class SmartSuiteClient {
     if (options.filter) {
       body.filter = options.filter
     }
-
     if (options.sort) {
       body.sort = options.sort
     }
-
     if (options.limit) {
       body.limit = options.limit
     }
-
     if (options.offset) {
       body.offset = options.offset
     }
@@ -110,6 +107,7 @@ class SmartSuiteClient {
         body: JSON.stringify(body)
       }
     )
+
     return result as ListResponse<T>
   }
 
