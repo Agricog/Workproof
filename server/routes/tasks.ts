@@ -1,8 +1,9 @@
 import { Hono } from 'hono'
 import { getSmartSuiteClient, TABLES } from '../lib/smartsuite.js'
+import { USER_FIELDS, JOB_FIELDS, TASK_FIELDS } from '../lib/smartsuite-fields.js'
 import { authMiddleware, getAuth } from '../middleware/auth.js'
 import { rateLimitMiddleware } from '../middleware/rateLimit.js'
-import type { Task, Job, User, CreateTaskRequest, UpdateTaskRequest } from '../types/index.js'
+import type { Task, Job, User } from '../types/index.js'
 
 const tasks = new Hono()
 
@@ -13,7 +14,7 @@ tasks.use('*', authMiddleware)
 // Helper: Get user record ID from Clerk ID
 async function getUserRecordId(clerkId: string): Promise<string | null> {
   const client = getSmartSuiteClient()
-  const user = await client.findByField<User>(TABLES.USERS, 'clerk_id', clerkId)
+  const user = await client.findByField<User>(TABLES.USERS, USER_FIELDS.clerk_id, clerkId)
   return user?.id || null
 }
 
@@ -26,13 +27,64 @@ async function verifyJobOwnership(jobId: string, clerkId: string): Promise<boole
 
   try {
     const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
-    return job.user === userRecordId
+    // Linked record field may return array
+    const jobUserIds = job[JOB_FIELDS.user as keyof Job] as string[] | string
+    const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
+    return userIds.includes(userRecordId)
   } catch {
     return false
   }
 }
 
-// List tasks for a job
+// List tasks - supports both /tasks?job_id=xxx and /tasks/job/:jobId
+tasks.get('/', async (c) => {
+  const auth = getAuth(c)
+  const jobId = c.req.query('job_id')
+  const client = getSmartSuiteClient()
+
+  if (!jobId) {
+    return c.json({ error: 'Missing job_id parameter' }, 400)
+  }
+
+  try {
+    // Verify ownership
+    const isOwner = await verifyJobOwnership(jobId, auth.userId)
+    if (!isOwner) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
+
+    // Get query params
+    const status = c.req.query('status')
+
+    // Build filter using field IDs
+    // Linked record fields need 'has_any' comparison
+    const filterFields: Array<{ field: string; comparison: string; value: unknown }> = [
+      { field: TASK_FIELDS.job, comparison: 'has_any', value: [jobId] }
+    ]
+
+    if (status) {
+      filterFields.push({ field: TASK_FIELDS.status, comparison: 'is', value: status })
+    }
+
+    const result = await client.listRecords<Task>(TABLES.TASKS, {
+      filter: {
+        operator: 'and',
+        fields: filterFields
+      },
+      sort: [{ field: TASK_FIELDS.order, direction: 'asc' }]
+    })
+
+    return c.json({
+      items: result.items,
+      total: result.total
+    })
+  } catch (error) {
+    console.error('Error listing tasks:', error)
+    return c.json({ error: 'Failed to list tasks' }, 500)
+  }
+})
+
+// List tasks for a job (alternative route)
 tasks.get('/job/:jobId', async (c) => {
   const auth = getAuth(c)
   const jobId = c.req.param('jobId')
@@ -48,13 +100,13 @@ tasks.get('/job/:jobId', async (c) => {
     // Get query params
     const status = c.req.query('status')
 
-    // Build filter
+    // Build filter using field IDs
     const filterFields: Array<{ field: string; comparison: string; value: unknown }> = [
-      { field: 'job', comparison: 'is', value: jobId }
+      { field: TASK_FIELDS.job, comparison: 'has_any', value: [jobId] }
     ]
 
     if (status) {
-      filterFields.push({ field: 'status', comparison: 'is', value: status })
+      filterFields.push({ field: TASK_FIELDS.status, comparison: 'is', value: status })
     }
 
     const result = await client.listRecords<Task>(TABLES.TASKS, {
@@ -62,7 +114,7 @@ tasks.get('/job/:jobId', async (c) => {
         operator: 'and',
         fields: filterFields
       },
-      sort: [{ field: 'order', direction: 'asc' }]
+      sort: [{ field: TASK_FIELDS.order, direction: 'asc' }]
     })
 
     return c.json({
@@ -84,8 +136,12 @@ tasks.get('/:id', async (c) => {
   try {
     const task = await client.getRecord<Task>(TABLES.TASKS, taskId)
 
+    // Get job ID from task (may be array for linked record)
+    const taskJobIds = task[TASK_FIELDS.job as keyof Task] as string[] | string
+    const jobId = Array.isArray(taskJobIds) ? taskJobIds[0] : taskJobIds
+
     // Verify ownership through job
-    const isOwner = await verifyJobOwnership(task.job, auth.userId)
+    const isOwner = await verifyJobOwnership(jobId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
     }
@@ -103,41 +159,47 @@ tasks.post('/', async (c) => {
   const client = getSmartSuiteClient()
 
   try {
-    const body = await c.req.json() as CreateTaskRequest
+    const body = await c.req.json() as Record<string, unknown>
+
+    // Support both formats
+    const jobId = (body.job || body.job_id) as string
+    const taskType = (body.task_type || body.taskType) as string
 
     // Validate required fields
-    if (!body.job || !body.task_type) {
-      return c.json({ error: 'Missing required fields: job, task_type' }, 400)
+    if (!jobId || !taskType) {
+      return c.json({ error: 'Missing required fields: job_id, task_type' }, 400)
     }
 
     // Verify ownership
-    const isOwner = await verifyJobOwnership(body.job, auth.userId)
+    const isOwner = await verifyJobOwnership(jobId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    // Get next order number if not provided
-    let order = body.order
-    if (order === undefined) {
-      const existingTasks = await client.listRecords<Task>(TABLES.TASKS, {
-        filter: {
-          operator: 'and',
-          fields: [{ field: 'job', comparison: 'is', value: body.job }]
-        }
-      })
-      order = existingTasks.total + 1
+    // Get next order number
+    const existingTasks = await client.listRecords<Task>(TABLES.TASKS, {
+      filter: {
+        operator: 'and',
+        fields: [{ field: TASK_FIELDS.job, comparison: 'has_any', value: [jobId] }]
+      }
+    })
+    const order = existingTasks.total + 1
+
+    // Create task with SmartSuite field IDs
+    // Linked record fields need array value
+    const taskData: Record<string, unknown> = {
+      title: `${taskType} - Task ${order}`,
+      [TASK_FIELDS.job]: [jobId],
+      [TASK_FIELDS.task_type]: taskType,
+      [TASK_FIELDS.status]: 'pending',
+      [TASK_FIELDS.order]: order
     }
 
-    // Create task
-    const taskData: Omit<Task, 'id'> = {
-      job: body.job,
-      task_type: body.task_type,
-      status: 'pending',
-      order,
-      notes: body.notes || undefined
+    if (body.notes) {
+      taskData[TASK_FIELDS.notes] = body.notes
     }
 
-    const task = await client.createRecord<Task>(TABLES.TASKS, taskData)
+    const task = await client.createRecord<Task>(TABLES.TASKS, taskData as Omit<Task, 'id'>)
 
     return c.json(task, 201)
   } catch (error) {
@@ -147,33 +209,47 @@ tasks.post('/', async (c) => {
 })
 
 // Bulk create tasks for a job
+// Frontend sends: { job_id: string, task_types: string[] }
 tasks.post('/bulk', async (c) => {
   const auth = getAuth(c)
   const client = getSmartSuiteClient()
 
   try {
-    const body = await c.req.json() as { job: string; tasks: Array<{ task_type: string; order?: number; notes?: string }> }
+    const body = await c.req.json() as Record<string, unknown>
 
-    if (!body.job || !body.tasks || !Array.isArray(body.tasks)) {
-      return c.json({ error: 'Missing required fields: job, tasks array' }, 400)
+    // Support both formats from frontend
+    const jobId = (body.job_id || body.job) as string
+    const taskTypes = (body.task_types || body.tasks) as string[] | Array<{ task_type: string }>
+
+    if (!jobId) {
+      return c.json({ error: 'Missing required field: job_id' }, 400)
+    }
+
+    if (!taskTypes || !Array.isArray(taskTypes) || taskTypes.length === 0) {
+      return c.json({ error: 'Missing required field: task_types array' }, 400)
     }
 
     // Verify ownership
-    const isOwner = await verifyJobOwnership(body.job, auth.userId)
+    const isOwner = await verifyJobOwnership(jobId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    // Prepare tasks with order
-    const tasksData = body.tasks.map((t, index) => ({
-      job: body.job,
-      task_type: t.task_type,
-      status: 'pending' as const,
-      order: t.order ?? index + 1,
-      notes: t.notes || undefined
+    // Normalize task types - handle both string[] and {task_type}[]
+    const normalizedTypes = taskTypes.map(t => 
+      typeof t === 'string' ? t : t.task_type
+    )
+
+    // Prepare tasks with SmartSuite field IDs
+    const tasksData = normalizedTypes.map((taskType, index) => ({
+      title: `${taskType} - Task ${index + 1}`,
+      [TASK_FIELDS.job]: [jobId],
+      [TASK_FIELDS.task_type]: taskType,
+      [TASK_FIELDS.status]: 'pending',
+      [TASK_FIELDS.order]: index + 1
     }))
 
-    const createdTasks = await client.bulkCreate<Task>(TABLES.TASKS, tasksData)
+    const createdTasks = await client.bulkCreate<Task>(TABLES.TASKS, tasksData as Array<Omit<Task, 'id'>>)
 
     return c.json({ items: createdTasks }, 201)
   } catch (error) {
@@ -192,30 +268,37 @@ tasks.patch('/:id', async (c) => {
     // Get existing task
     const existingTask = await client.getRecord<Task>(TABLES.TASKS, taskId)
 
+    // Get job ID from task
+    const taskJobIds = existingTask[TASK_FIELDS.job as keyof Task] as string[] | string
+    const jobId = Array.isArray(taskJobIds) ? taskJobIds[0] : taskJobIds
+
     // Verify ownership through job
-    const isOwner = await verifyJobOwnership(existingTask.job, auth.userId)
+    const isOwner = await verifyJobOwnership(jobId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    const body = await c.req.json() as UpdateTaskRequest
+    const body = await c.req.json() as Record<string, unknown>
 
-    // Only allow updating specific fields
-    const allowedFields = ['status', 'notes', 'started_at', 'completed_at']
+    // Map request fields to SmartSuite field IDs
+    const updateData: Record<string, unknown> = {}
 
-    const updateData: Partial<Task> = {}
-    for (const field of allowedFields) {
-      if (body[field as keyof UpdateTaskRequest] !== undefined) {
-        updateData[field as keyof Task] = body[field as keyof UpdateTaskRequest]
-      }
-    }
+    if (body.status !== undefined) updateData[TASK_FIELDS.status] = body.status
+    if (body.notes !== undefined) updateData[TASK_FIELDS.notes] = body.notes
+    if (body.started_at !== undefined) updateData[TASK_FIELDS.started_at] = body.started_at
+    if (body.startedAt !== undefined) updateData[TASK_FIELDS.started_at] = body.startedAt
+    if (body.completed_at !== undefined) updateData[TASK_FIELDS.completed_at] = body.completed_at
+    if (body.completedAt !== undefined) updateData[TASK_FIELDS.completed_at] = body.completedAt
 
     // Auto-set timestamps based on status
-    if (body.status === 'in_progress' && !existingTask.started_at) {
-      updateData.started_at = new Date().toISOString()
+    const currentStarted = existingTask[TASK_FIELDS.started_at as keyof Task]
+    const currentCompleted = existingTask[TASK_FIELDS.completed_at as keyof Task]
+
+    if (body.status === 'in_progress' && !currentStarted) {
+      updateData[TASK_FIELDS.started_at] = new Date().toISOString()
     }
-    if (body.status === 'completed' && !existingTask.completed_at) {
-      updateData.completed_at = new Date().toISOString()
+    if (body.status === 'completed' && !currentCompleted) {
+      updateData[TASK_FIELDS.completed_at] = new Date().toISOString()
     }
 
     if (Object.keys(updateData).length === 0) {
@@ -225,7 +308,67 @@ tasks.patch('/:id', async (c) => {
     const updatedTask = await client.updateRecord<Task>(
       TABLES.TASKS,
       taskId,
-      updateData
+      updateData as Partial<Task>
+    )
+
+    return c.json(updatedTask)
+  } catch (error) {
+    console.error('Error updating task:', error)
+    return c.json({ error: 'Failed to update task' }, 500)
+  }
+})
+
+// Also support PUT for updates
+tasks.put('/:id', async (c) => {
+  const auth = getAuth(c)
+  const taskId = c.req.param('id')
+  const client = getSmartSuiteClient()
+
+  try {
+    // Get existing task
+    const existingTask = await client.getRecord<Task>(TABLES.TASKS, taskId)
+
+    // Get job ID from task
+    const taskJobIds = existingTask[TASK_FIELDS.job as keyof Task] as string[] | string
+    const jobId = Array.isArray(taskJobIds) ? taskJobIds[0] : taskJobIds
+
+    // Verify ownership through job
+    const isOwner = await verifyJobOwnership(jobId, auth.userId)
+    if (!isOwner) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
+
+    const body = await c.req.json() as Record<string, unknown>
+
+    // Map request fields to SmartSuite field IDs
+    const updateData: Record<string, unknown> = {}
+
+    if (body.status !== undefined) updateData[TASK_FIELDS.status] = body.status
+    if (body.notes !== undefined) updateData[TASK_FIELDS.notes] = body.notes
+    if (body.started_at !== undefined) updateData[TASK_FIELDS.started_at] = body.started_at
+    if (body.startedAt !== undefined) updateData[TASK_FIELDS.started_at] = body.startedAt
+    if (body.completed_at !== undefined) updateData[TASK_FIELDS.completed_at] = body.completed_at
+    if (body.completedAt !== undefined) updateData[TASK_FIELDS.completed_at] = body.completedAt
+
+    // Auto-set timestamps based on status
+    const currentStarted = existingTask[TASK_FIELDS.started_at as keyof Task]
+    const currentCompleted = existingTask[TASK_FIELDS.completed_at as keyof Task]
+
+    if (body.status === 'in_progress' && !currentStarted) {
+      updateData[TASK_FIELDS.started_at] = new Date().toISOString()
+    }
+    if (body.status === 'completed' && !currentCompleted) {
+      updateData[TASK_FIELDS.completed_at] = new Date().toISOString()
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return c.json({ error: 'No valid fields to update' }, 400)
+    }
+
+    const updatedTask = await client.updateRecord<Task>(
+      TABLES.TASKS,
+      taskId,
+      updateData as Partial<Task>
     )
 
     return c.json(updatedTask)
@@ -245,8 +388,12 @@ tasks.delete('/:id', async (c) => {
     // Get existing task
     const existingTask = await client.getRecord<Task>(TABLES.TASKS, taskId)
 
+    // Get job ID from task
+    const taskJobIds = existingTask[TASK_FIELDS.job as keyof Task] as string[] | string
+    const jobId = Array.isArray(taskJobIds) ? taskJobIds[0] : taskJobIds
+
     // Verify ownership through job
-    const isOwner = await verifyJobOwnership(existingTask.job, auth.userId)
+    const isOwner = await verifyJobOwnership(jobId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
     }
@@ -266,21 +413,26 @@ tasks.post('/reorder', async (c) => {
   const client = getSmartSuiteClient()
 
   try {
-    const body = await c.req.json() as { job: string; taskIds: string[] }
+    const body = await c.req.json() as Record<string, unknown>
 
-    if (!body.job || !body.taskIds || !Array.isArray(body.taskIds)) {
-      return c.json({ error: 'Missing required fields: job, taskIds array' }, 400)
+    const jobId = (body.job_id || body.job) as string
+    const taskIds = (body.task_ids || body.taskIds) as string[]
+
+    if (!jobId || !taskIds || !Array.isArray(taskIds)) {
+      return c.json({ error: 'Missing required fields: job_id, task_ids array' }, 400)
     }
 
     // Verify ownership
-    const isOwner = await verifyJobOwnership(body.job, auth.userId)
+    const isOwner = await verifyJobOwnership(jobId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    // Update order for each task
-    const updates = body.taskIds.map((taskId, index) =>
-      client.updateRecord<Task>(TABLES.TASKS, taskId, { order: index + 1 })
+    // Update order for each task using field ID
+    const updates = taskIds.map((taskId, index) =>
+      client.updateRecord<Task>(TABLES.TASKS, taskId, { 
+        [TASK_FIELDS.order]: index + 1 
+      } as Partial<Task>)
     )
 
     await Promise.all(updates)
