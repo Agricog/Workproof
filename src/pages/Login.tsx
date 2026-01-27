@@ -68,24 +68,24 @@ export default function Login() {
               </p>
 
               <SignIn
-                appearance={{
-                  elements: {
-                    rootBox: 'w-full',
-                    card: 'shadow-none p-0',
-                    headerTitle: 'hidden',
-                    headerSubtitle: 'hidden',
-                    formButtonPrimary:
-                      'bg-green-600 hover:bg-green-700 text-white font-medium py-2.5 rounded-lg',
-                    formFieldInput:
-                      'border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500',
-                    footerActionLink: 'text-green-600 hover:text-green-700',
-                  },
-                }}
-                routing="path"
-                path="/login"
-                signUpUrl="/login"
-                afterSignInUrl="/dashboard"
-              />
+  appearance={{
+    elements: {
+      rootBox: 'w-full',
+      card: 'shadow-none p-0',
+      headerTitle: 'hidden',
+      headerSubtitle: 'hidden',
+      formButtonPrimary:
+        'bg-green-600 hover:bg-green-700 text-white font-medium py-2.5 rounded-lg',
+      formFieldInput:
+        'border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500',
+      footerActionLink: 'text-green-600 hover:text-green-700',
+    },
+  }}
+  routing="path"
+  path="/login"
+  signUpUrl="/login"
+  forceRedirectUrl="/dashboard"
+/>
             </div>
 
             {/* Back link */}
