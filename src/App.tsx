@@ -125,8 +125,8 @@ export default function App() {
             {/* Public routes */}
             <Route path="/" element={<Landing />} />
             <Route
-              path="/login"
-              element={
+  path="/login/*"
+  element={
                 <>
                   <SignedIn>
                     <Navigate to="/dashboard" replace />
