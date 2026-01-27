@@ -63,20 +63,20 @@ async function apiRequest<T>(
  */
 function base64ToBlob(base64: string, contentType: string = 'image/jpeg'): Blob {
   // Remove data URL prefix if present
-  const base64Data = base64.includes(',') ? base64.split(',')[1] : base64
-  const byteCharacters = atob(base64Data)
-  const byteArrays: Uint8Array[] = []
-  
-  for (let offset = 0; offset < byteCharacters.length; offset += 512) {
-    const slice = byteCharacters.slice(offset, offset + 512)
-    const byteNumbers = new Array(slice.length)
-    for (let i = 0; i < slice.length; i++) {
-      byteNumbers[i] = slice.charCodeAt(i)
-    }
-    byteArrays.push(new Uint8Array(byteNumbers))
+  let base64Data = base64
+  if (base64.includes(',')) {
+    const parts = base64.split(',')
+    base64Data = parts[1] || parts[0]
   }
   
-  return new Blob(byteArrays, { type: contentType })
+  const byteCharacters = atob(base64Data)
+  const byteNumbers = new Uint8Array(byteCharacters.length)
+  
+  for (let i = 0; i < byteCharacters.length; i++) {
+    byteNumbers[i] = byteCharacters.charCodeAt(i)
+  }
+  
+  return new Blob([byteNumbers], { type: contentType })
 }
 
 /**
