@@ -107,14 +107,15 @@ async function handleUserCreated(data: ClerkWebhookEvent['data']) {
     return
   }
 
-  // Create new user in SmartSuite using field IDs
-  const userData = {
-    [USER_FIELDS.clerk_id]: data.id,
-    [USER_FIELDS.email]: primaryEmail,
-    [USER_FIELDS.full_name]: fullName,
-    [USER_FIELDS.subscription_status]: 'free',
-    [USER_FIELDS.last_login]: new Date().toISOString()
-  }
+  /// Create new user in SmartSuite using field IDs
+const userData = {
+  title: fullName,
+  [USER_FIELDS.clerk_id]: data.id,
+  [USER_FIELDS.email]: primaryEmail,
+  [USER_FIELDS.full_name]: fullName,
+  [USER_FIELDS.subscription_status]: 'free',
+  [USER_FIELDS.last_login]: new Date().toISOString()
+}
 
   const user = await client.createRecord(TABLES.USERS, userData)
   console.log('User created in SmartSuite:', user.id)
