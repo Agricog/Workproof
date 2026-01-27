@@ -75,7 +75,18 @@ export default function JobDetail() {
       const tasksResponse = await tasksApi.listByJob(jobId, token)
 
       if (tasksResponse.data) {
-        setTasks(tasksResponse.data)
+        // Handle both array and paginated response formats
+        // API returns { items: [...], total: N }
+        const taskData = tasksResponse.data as unknown
+        let taskItems: Task[] = []
+        
+        if (Array.isArray(taskData)) {
+          taskItems = taskData
+        } else if (taskData && typeof taskData === 'object' && 'items' in taskData) {
+          taskItems = (taskData as { items: Task[] }).items || []
+        }
+        
+        setTasks(taskItems)
       }
     } catch (err) {
       const errorMessage = 'Failed to load job details. Please try again.'
@@ -379,3 +390,4 @@ export default function JobDetail() {
     </div>
   )
 }
+
