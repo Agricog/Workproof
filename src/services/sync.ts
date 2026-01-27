@@ -2,7 +2,6 @@
  * WorkProof Sync Service
  * Background sync for offline evidence
  */
-
 import { 
   getSyncQueue, 
   removeFromSyncQueue, 
@@ -13,20 +12,26 @@ import {
 } from '../utils/indexedDB'
 import { evidenceApi } from './api'
 import { captureSyncError } from '../utils/errorTracking'
+import { trackEvidenceSynced } from '../utils/analytics'
 
 const MAX_RETRY_ATTEMPTS = 5
 const SYNC_INTERVAL_MS = 60 * 1000 // 1 minute
 
 let syncInProgress = false
 let syncIntervalId: ReturnType<typeof setInterval> | null = null
+let getTokenFn: (() => Promise<string | null>) | null = null
 
 /**
  * Start the background sync service
+ * @param getToken - Function to get Clerk auth token
  */
-export function startSyncService(): void {
+export function startSyncService(getToken: () => Promise<string | null>): void {
   if (syncIntervalId) {
     return // Already running
   }
+
+  // Store token getter for use in sync operations
+  getTokenFn = getToken
 
   // Initial sync
   triggerSync()
@@ -40,6 +45,9 @@ export function startSyncService(): void {
 
   // Listen for online events
   window.addEventListener('online', handleOnline)
+  
+  // Listen for manual sync triggers
+  window.addEventListener('workproof:sync', handleManualSync)
 }
 
 /**
@@ -50,7 +58,9 @@ export function stopSyncService(): void {
     clearInterval(syncIntervalId)
     syncIntervalId = null
   }
+  getTokenFn = null
   window.removeEventListener('online', handleOnline)
+  window.removeEventListener('workproof:sync', handleManualSync)
 }
 
 /**
@@ -62,21 +72,35 @@ function handleOnline(): void {
 }
 
 /**
+ * Handle manual sync trigger
+ */
+function handleManualSync(): void {
+  triggerSync()
+}
+
+/**
  * Trigger a sync cycle
  */
 export async function triggerSync(): Promise<void> {
-  if (syncInProgress || !navigator.onLine) {
+  if (syncInProgress || !navigator.onLine || !getTokenFn) {
     return
   }
 
   syncInProgress = true
 
   try {
+    // Get fresh token
+    const token = await getTokenFn()
+    if (!token) {
+      console.warn('No auth token available for sync')
+      return
+    }
+
     // Sync evidence first
-    await syncEvidence()
+    await syncEvidence(token)
 
     // Then process sync queue
-    await processSyncQueue()
+    await processSyncQueue(token)
   } catch (error) {
     captureSyncError(error, 'triggerSync')
   } finally {
@@ -87,32 +111,39 @@ export async function triggerSync(): Promise<void> {
 /**
  * Sync unsynced evidence to server
  */
-async function syncEvidence(): Promise<void> {
+async function syncEvidence(token: string): Promise<void> {
   const unsyncedItems = await getUnsyncedEvidence()
-
+  
   if (unsyncedItems.length === 0) {
     return
   }
 
   console.log(`Syncing ${unsyncedItems.length} evidence items`)
+  
+  let syncedCount = 0
 
   for (const item of unsyncedItems) {
     if (!item) continue
     
     try {
-      const response = await evidenceApi.upload(item.taskId, {
-        evidenceType: item.evidenceType,
-        photoData: item.photoData,
-        thumbnailData: item.thumbnailData,
-        hash: item.hash,
-        capturedAt: item.capturedAt,
-        latitude: item.latitude,
-        longitude: item.longitude,
-        accuracy: item.accuracy,
-      })
+      const response = await evidenceApi.upload(
+        item.taskId,
+        {
+          evidenceType: item.evidenceType,
+          photoData: item.photoData,
+          thumbnailData: item.thumbnailData,
+          hash: item.hash,
+          capturedAt: item.capturedAt,
+          latitude: item.latitude,
+          longitude: item.longitude,
+          accuracy: item.accuracy,
+        },
+        token
+      )
 
       if (response.data) {
         await markEvidenceSynced(item.id)
+        syncedCount++
         console.log(`Evidence ${item.id} synced successfully`)
       } else {
         console.error(`Failed to sync evidence ${item.id}:`, response.error)
@@ -121,14 +152,19 @@ async function syncEvidence(): Promise<void> {
       captureSyncError(error, 'syncEvidence')
     }
   }
+
+  // Track analytics
+  if (syncedCount > 0) {
+    trackEvidenceSynced(syncedCount)
+  }
 }
 
 /**
  * Process items in the sync queue
  */
-async function processSyncQueue(): Promise<void> {
+async function processSyncQueue(token: string): Promise<void> {
   const queue = await getSyncQueue()
-
+  
   if (queue.length === 0) {
     return
   }
@@ -144,8 +180,8 @@ async function processSyncQueue(): Promise<void> {
     }
 
     try {
-      const success = await processSyncItem(item)
-
+      const success = await processSyncItem(item, token)
+      
       if (success) {
         await removeFromSyncQueue(item.id)
         console.log(`Sync item ${item.id} processed successfully`)
@@ -162,14 +198,14 @@ async function processSyncQueue(): Promise<void> {
 /**
  * Process a single sync queue item
  */
-async function processSyncItem(item: SyncQueueItem): Promise<boolean> {
+async function processSyncItem(item: SyncQueueItem, token: string): Promise<boolean> {
   switch (item.type) {
     case 'evidence':
-      return processEvidenceSync(item)
+      return processEvidenceSync(item, token)
     case 'job':
-      return processJobSync(item)
+      return processJobSync(item, token)
     case 'task':
-      return processTaskSync(item)
+      return processTaskSync(item, token)
     default:
       console.warn(`Unknown sync item type: ${item.type}`)
       return false
@@ -179,7 +215,7 @@ async function processSyncItem(item: SyncQueueItem): Promise<boolean> {
 /**
  * Process evidence sync item
  */
-async function processEvidenceSync(item: SyncQueueItem): Promise<boolean> {
+async function processEvidenceSync(item: SyncQueueItem, token: string): Promise<boolean> {
   const data = item.data as {
     taskId: string
     evidenceType: string
@@ -192,16 +228,20 @@ async function processEvidenceSync(item: SyncQueueItem): Promise<boolean> {
     accuracy: number | null
   }
 
-  const response = await evidenceApi.upload(data.taskId, {
-    evidenceType: data.evidenceType,
-    photoData: data.photoData,
-    thumbnailData: data.thumbnailData,
-    hash: data.hash,
-    capturedAt: data.capturedAt,
-    latitude: data.latitude,
-    longitude: data.longitude,
-    accuracy: data.accuracy,
-  })
+  const response = await evidenceApi.upload(
+    data.taskId,
+    {
+      evidenceType: data.evidenceType,
+      photoData: data.photoData,
+      thumbnailData: data.thumbnailData,
+      hash: data.hash,
+      capturedAt: data.capturedAt,
+      latitude: data.latitude,
+      longitude: data.longitude,
+      accuracy: data.accuracy,
+    },
+    token
+  )
 
   return !!response.data
 }
@@ -209,8 +249,8 @@ async function processEvidenceSync(item: SyncQueueItem): Promise<boolean> {
 /**
  * Process job sync item
  */
-async function processJobSync(item: SyncQueueItem): Promise<boolean> {
-  // TODO: Implement job sync when backend is ready
+async function processJobSync(item: SyncQueueItem, _token: string): Promise<boolean> {
+  // TODO: Implement job sync when needed
   console.log('Job sync not yet implemented', item)
   return true
 }
@@ -218,8 +258,8 @@ async function processJobSync(item: SyncQueueItem): Promise<boolean> {
 /**
  * Process task sync item
  */
-async function processTaskSync(item: SyncQueueItem): Promise<boolean> {
-  // TODO: Implement task sync when backend is ready
+async function processTaskSync(item: SyncQueueItem, _token: string): Promise<boolean> {
+  // TODO: Implement task sync when needed
   console.log('Task sync not yet implemented', item)
   return true
 }
@@ -246,9 +286,17 @@ export async function getSyncStatus(): Promise<{
 
 /**
  * Force sync now (for manual trigger)
+ * @param getToken - Function to get Clerk auth token
  */
-export async function forceSyncNow(): Promise<{ success: boolean; synced: number; failed: number }> {
+export async function forceSyncNow(
+  getToken: () => Promise<string | null>
+): Promise<{ success: boolean; synced: number; failed: number }> {
   if (!navigator.onLine) {
+    return { success: false, synced: 0, failed: 0 }
+  }
+
+  const token = await getToken()
+  if (!token) {
     return { success: false, synced: 0, failed: 0 }
   }
 
@@ -259,21 +307,25 @@ export async function forceSyncNow(): Promise<{ success: boolean; synced: number
 
   try {
     const unsyncedItems = await getUnsyncedEvidence()
-
+    
     for (const item of unsyncedItems) {
       if (!item) continue
       
       try {
-        const response = await evidenceApi.upload(item.taskId, {
-          evidenceType: item.evidenceType,
-          photoData: item.photoData,
-          thumbnailData: item.thumbnailData,
-          hash: item.hash,
-          capturedAt: item.capturedAt,
-          latitude: item.latitude,
-          longitude: item.longitude,
-          accuracy: item.accuracy,
-        })
+        const response = await evidenceApi.upload(
+          item.taskId,
+          {
+            evidenceType: item.evidenceType,
+            photoData: item.photoData,
+            thumbnailData: item.thumbnailData,
+            hash: item.hash,
+            capturedAt: item.capturedAt,
+            latitude: item.latitude,
+            longitude: item.longitude,
+            accuracy: item.accuracy,
+          },
+          token
+        )
 
         if (response.data) {
           await markEvidenceSynced(item.id)
@@ -285,6 +337,11 @@ export async function forceSyncNow(): Promise<{ success: boolean; synced: number
         failed++
         captureSyncError(error, 'forceSyncNow')
       }
+    }
+
+    // Track analytics
+    if (synced > 0) {
+      trackEvidenceSynced(synced)
     }
 
     return { success: true, synced, failed }
