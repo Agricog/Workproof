@@ -35,8 +35,9 @@ jobs.get('/', async (c) => {
     const offset = parseInt(c.req.query('offset') || '0')
 
     // Build filter using field IDs
+    // Note: Linked record fields need 'has_any' comparison with array value
     const filterFields: Array<{ field: string; comparison: string; value: unknown }> = [
-      { field: JOB_FIELDS.user, comparison: 'is', value: userRecordId }
+      { field: JOB_FIELDS.user, comparison: 'has_any', value: [userRecordId] }
     ]
 
     if (status) {
@@ -65,6 +66,36 @@ jobs.get('/', async (c) => {
   }
 })
 
+// Also support query param for job_id filter (used by frontend)
+jobs.get('/', async (c) => {
+  const auth = getAuth(c)
+  const client = getSmartSuiteClient()
+  const jobId = c.req.query('job_id')
+
+  // If job_id provided, return single job
+  if (jobId) {
+    try {
+      const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
+      const userRecordId = await getUserRecordId(auth.userId)
+      
+      // Check ownership - linked record field returns array
+      const jobUserIds = job[JOB_FIELDS.user as keyof Job] as string[] | string
+      const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
+      
+      if (!userIds.includes(userRecordId || '')) {
+        return c.json({ error: 'Forbidden' }, 403)
+      }
+
+      return c.json(job)
+    } catch (error) {
+      console.error('Error fetching job:', error)
+      return c.json({ error: 'Failed to fetch job' }, 500)
+    }
+  }
+
+  // Default: list all jobs (handled by first route)
+})
+
 // Get single job by ID
 jobs.get('/:id', async (c) => {
   const auth = getAuth(c)
@@ -74,11 +105,12 @@ jobs.get('/:id', async (c) => {
   try {
     const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
 
-    // Verify ownership - check using field ID
+    // Verify ownership - linked record field may return array
     const userRecordId = await getUserRecordId(auth.userId)
-    const jobUserId = job[JOB_FIELDS.user as keyof Job]
+    const jobUserIds = job[JOB_FIELDS.user as keyof Job] as string[] | string
+    const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
     
-    if (jobUserId !== userRecordId) {
+    if (!userIds.includes(userRecordId || '')) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
@@ -121,10 +153,15 @@ jobs.post('/', async (c) => {
       return c.json({ error: 'Missing required field: client_name' }, 400)
     }
 
+    // Create unique title with timestamp to avoid SmartSuite unique constraint
+    const timestamp = Date.now()
+    const jobTitle = title || `${clientName} - ${address} (${timestamp})`
+
     // Create job with SmartSuite field IDs
+    // Linked record fields need array value
     const jobData: Record<string, unknown> = {
-      title: title || `${clientName} - ${address}`,
-      [JOB_FIELDS.user]: userRecordId,
+      title: jobTitle,
+      [JOB_FIELDS.user]: [userRecordId],
       [JOB_FIELDS.address]: address,
       [JOB_FIELDS.postcode]: postcode?.toUpperCase() || '',
       [JOB_FIELDS.client_name]: clientName,
@@ -163,8 +200,10 @@ jobs.patch('/:id', async (c) => {
     const existingJob = await client.getRecord<Job>(TABLES.JOBS, jobId)
     const userRecordId = await getUserRecordId(auth.userId)
     
-    const jobUserId = existingJob[JOB_FIELDS.user as keyof Job]
-    if (jobUserId !== userRecordId) {
+    const jobUserIds = existingJob[JOB_FIELDS.user as keyof Job] as string[] | string
+    const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
+    
+    if (!userIds.includes(userRecordId || '')) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
@@ -215,8 +254,10 @@ jobs.put('/:id', async (c) => {
     const existingJob = await client.getRecord<Job>(TABLES.JOBS, jobId)
     const userRecordId = await getUserRecordId(auth.userId)
     
-    const jobUserId = existingJob[JOB_FIELDS.user as keyof Job]
-    if (jobUserId !== userRecordId) {
+    const jobUserIds = existingJob[JOB_FIELDS.user as keyof Job] as string[] | string
+    const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
+    
+    if (!userIds.includes(userRecordId || '')) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
@@ -267,8 +308,10 @@ jobs.delete('/:id', async (c) => {
     const existingJob = await client.getRecord<Job>(TABLES.JOBS, jobId)
     const userRecordId = await getUserRecordId(auth.userId)
     
-    const jobUserId = existingJob[JOB_FIELDS.user as keyof Job]
-    if (jobUserId !== userRecordId) {
+    const jobUserIds = existingJob[JOB_FIELDS.user as keyof Job] as string[] | string
+    const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
+    
+    if (!userIds.includes(userRecordId || '')) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
