@@ -24,7 +24,6 @@ const TASK_STATUS_CONFIG: Record<TaskStatus, { label: string; color: string }> =
 }
 
 export default function TaskDetail() {
-  const { jobId, taskId } = useParams<{ jobId: string; taskId: string }>()
   const navigate = useNavigate()
   const { getToken } = useAuth()
   const [task, setTask] = useState<Task | null>(null)
