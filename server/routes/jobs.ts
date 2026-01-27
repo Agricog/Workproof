@@ -90,9 +90,12 @@ jobs.get('/', async (c) => {
 
     // Sort by created_at descending
     filteredItems.sort((a, b) => {
-      const aDate = (a as unknown as Record<string, unknown>)[JOB_FIELDS.created_at] as string || ''
-      const bDate = (b as unknown as Record<string, unknown>)[JOB_FIELDS.created_at] as string || ''
-      return bDate.localeCompare(aDate)
+      const aRaw = (a as unknown as Record<string, unknown>)[JOB_FIELDS.created_at]
+      const bRaw = (b as unknown as Record<string, unknown>)[JOB_FIELDS.created_at]
+      // Handle both string and object date formats
+      const aDate = typeof aRaw === 'string' ? aRaw : (aRaw as { date?: string })?.date || ''
+      const bDate = typeof bRaw === 'string' ? bRaw : (bRaw as { date?: string })?.date || ''
+      return String(bDate).localeCompare(String(aDate))
     })
 
     // Transform each job to readable format
@@ -173,7 +176,7 @@ jobs.post('/', async (c) => {
     const timestamp = Date.now()
     const jobTitle = title || `${clientName} - ${address} (${timestamp})`
 
-    // Format date for SmartSuite (expects object with date property)
+    // Format date for SmartSuite (plain string format)
     const formattedStartDate = startDate || new Date().toISOString().split('T')[0]
 
     // Create job with SmartSuite field IDs
@@ -185,7 +188,7 @@ jobs.post('/', async (c) => {
       [JOB_FIELDS.postcode]: postcode?.toUpperCase() || '',
       [JOB_FIELDS.client_name]: clientName,
       [JOB_FIELDS.status]: 'active',
-      [JOB_FIELDS.start_date]: { date: formattedStartDate }
+      [JOB_FIELDS.start_date]: formattedStartDate
     }
 
     // Add optional fields if provided
@@ -241,8 +244,8 @@ jobs.patch('/:id', async (c) => {
     if (body.client_email !== undefined) updateData[JOB_FIELDS.client_email] = body.client_email
     if (body.clientEmail !== undefined) updateData[JOB_FIELDS.client_email] = body.clientEmail
     if (body.status !== undefined) updateData[JOB_FIELDS.status] = body.status
-    if (body.completion_date !== undefined) updateData[JOB_FIELDS.completion_date] = { date: body.completion_date }
-    if (body.completionDate !== undefined) updateData[JOB_FIELDS.completion_date] = { date: body.completionDate }
+    if (body.completion_date !== undefined) updateData[JOB_FIELDS.completion_date] = body.completion_date
+    if (body.completionDate !== undefined) updateData[JOB_FIELDS.completion_date] = body.completionDate
     if (body.notes !== undefined) updateData[JOB_FIELDS.notes] = body.notes
 
     if (Object.keys(updateData).length === 0) {
@@ -295,8 +298,8 @@ jobs.put('/:id', async (c) => {
     if (body.client_email !== undefined) updateData[JOB_FIELDS.client_email] = body.client_email
     if (body.clientEmail !== undefined) updateData[JOB_FIELDS.client_email] = body.clientEmail
     if (body.status !== undefined) updateData[JOB_FIELDS.status] = body.status
-    if (body.completion_date !== undefined) updateData[JOB_FIELDS.completion_date] = { date: body.completion_date }
-    if (body.completionDate !== undefined) updateData[JOB_FIELDS.completion_date] = { date: body.completionDate }
+    if (body.completion_date !== undefined) updateData[JOB_FIELDS.completion_date] = body.completion_date
+    if (body.completionDate !== undefined) updateData[JOB_FIELDS.completion_date] = body.completionDate
     if (body.notes !== undefined) updateData[JOB_FIELDS.notes] = body.notes
 
     if (Object.keys(updateData).length === 0) {
