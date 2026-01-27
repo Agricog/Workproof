@@ -51,6 +51,7 @@ export default function Jobs() {
   const loadJobs = async () => {
     setIsLoading(true)
     setError(null)
+
     try {
       const token = await getToken()
       const response = await jobsApi.list(token)
@@ -62,7 +63,18 @@ export default function Jobs() {
       }
       
       if (response.data) {
-        setJobs(response.data)
+        // Handle both array and paginated response formats
+        // API returns { items: [...], total: N }
+        const jobData = response.data as unknown
+        let jobItems: Job[] = []
+        
+        if (Array.isArray(jobData)) {
+          jobItems = jobData
+        } else if (jobData && typeof jobData === 'object' && 'items' in jobData) {
+          jobItems = (jobData as { items: Job[] }).items || []
+        }
+        
+        setJobs(jobItems)
       }
     } catch (err) {
       const errorMessage = 'Failed to load jobs. Please try again.'
@@ -90,8 +102,8 @@ export default function Jobs() {
       const query = searchQuery.toLowerCase()
       filtered = filtered.filter(
         (job) =>
-          job.clientName.toLowerCase().includes(query) ||
-          job.address.toLowerCase().includes(query)
+          (job.clientName || '').toLowerCase().includes(query) ||
+          (job.address || '').toLowerCase().includes(query)
       )
     }
 
@@ -215,7 +227,8 @@ export default function Jobs() {
         ) : (
           <div className="space-y-3" role="list" aria-label="Jobs list">
             {filteredJobs.map((job) => {
-              const statusConfig = STATUS_CONFIG[job.status]
+              const jobStatus = (job.status || 'active') as JobStatus
+              const statusConfig = STATUS_CONFIG[jobStatus] || STATUS_CONFIG.active
               const StatusIcon = statusConfig.icon
 
               return (
@@ -229,7 +242,7 @@ export default function Jobs() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <h3 className="font-medium text-gray-900 truncate">
-                          {job.clientName}
+                          {job.clientName || 'Unknown Client'}
                         </h3>
                         <span
                           className={`badge badge-${statusConfig.color} flex items-center gap-1`}
@@ -240,25 +253,25 @@ export default function Jobs() {
                       </div>
                       <div className="flex items-center gap-1 text-sm text-gray-500">
                         <MapPin className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
-                        <span className="truncate">{job.address}</span>
+                        <span className="truncate">{job.address || 'No address'}</span>
                       </div>
                       <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
                         <div className="flex items-center gap-1">
                           <Calendar className="w-3 h-3" aria-hidden="true" />
-                          {new Date(job.startDate).toLocaleDateString('en-GB', {
+                          {job.startDate ? new Date(job.startDate).toLocaleDateString('en-GB', {
                             day: 'numeric',
                             month: 'short',
-                          })}
+                          }) : 'No date'}
                         </div>
                         <div>
-                          {job.taskCount} task{job.taskCount !== 1 ? 's' : ''}
+                          {job.taskCount || 0} task{(job.taskCount || 0) !== 1 ? 's' : ''}
                         </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 ml-4">
                       <div className="text-right">
                         <p className="text-sm font-medium text-gray-900">
-                          {job.evidenceCount}/{job.completedEvidenceCount}
+                          {job.evidenceCount || 0}/{job.completedEvidenceCount || 0}
                         </p>
                         <p className="text-xs text-gray-500">evidence</p>
                       </div>
