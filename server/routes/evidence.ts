@@ -3,6 +3,7 @@ import { getSmartSuiteClient, TABLES } from '../lib/smartsuite.js'
 import { USER_FIELDS, TASK_FIELDS, EVIDENCE_FIELDS } from '../lib/smartsuite-fields.js'
 import { authMiddleware, getAuth } from '../middleware/auth.js'
 import { rateLimitMiddleware } from '../middleware/rateLimit.js'
+import { getSignedUploadUrl, generateEvidenceKey, validateR2Config, deleteObject, extractKeyFromUrl } from '../lib/r2.js'
 import type { Evidence, Task, User } from '../types/index.js'
 
 const evidence = new Hono()
@@ -150,24 +151,38 @@ evidence.post('/upload-url', async (c) => {
   const auth = getAuth(c)
 
   try {
+    // Validate R2 configuration
+    const r2Config = validateR2Config()
+    if (!r2Config.valid) {
+      console.error('R2 configuration missing:', r2Config.missing)
+      return c.json({ error: 'File storage not configured' }, 500)
+    }
+
     const body = await c.req.json() as Record<string, unknown>
     const filename = body.filename as string
+    const contentType = (body.content_type || body.contentType || 'image/jpeg') as string
+    const jobId = (body.job_id || body.jobId || 'unknown') as string
+    const taskId = (body.task_id || body.taskId || 'unknown') as string
 
     if (!filename) {
       return c.json({ error: 'Missing filename' }, 400)
     }
 
-    // Generate unique key
-    const timestamp = Date.now()
-    const key = `evidence/${auth.userId}/${timestamp}-${filename}`
+    // Validate content type (only allow images)
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/heic']
+    if (!allowedTypes.includes(contentType)) {
+      return c.json({ error: 'Invalid file type. Only JPEG, PNG, WebP, and HEIC images are allowed.' }, 400)
+    }
 
-    // For now, return a placeholder URL
-    // In production, this would generate a signed R2 upload URL
-    const r2PublicUrl = process.env.R2_PUBLIC_URL || 'https://workproof-evidence.r2.cloudflarestorage.com'
-    
+    // Generate unique key with proper structure
+    const key = generateEvidenceKey(auth.userId, jobId, taskId, filename)
+
+    // Generate signed upload URL (expires in 5 minutes)
+    const { uploadUrl, publicUrl } = await getSignedUploadUrl(key, contentType, 300)
+
     return c.json({
-      upload_url: `${r2PublicUrl}/${key}`,
-      photo_url: `${r2PublicUrl}/${key}`,
+      upload_url: uploadUrl,
+      photo_url: publicUrl,
       key
     })
   } catch (error) {
@@ -258,6 +273,20 @@ evidence.delete('/:id', async (c) => {
     const isOwner = await verifyTaskOwnership(taskId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
+    }
+
+    // Delete file from R2 if URL exists
+    const photoUrl = existingEvidence[EVIDENCE_FIELDS.photo_url as keyof Evidence] as string
+    if (photoUrl) {
+      const key = extractKeyFromUrl(photoUrl)
+      if (key) {
+        try {
+          await deleteObject(key)
+        } catch (r2Error) {
+          console.error('Failed to delete file from R2:', r2Error)
+          // Continue with SmartSuite deletion even if R2 fails
+        }
+      }
     }
 
     await client.deleteRecord(TABLES.EVIDENCE, evidenceId)
