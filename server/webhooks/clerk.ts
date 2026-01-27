@@ -112,7 +112,10 @@ const userData = {
   title: fullName,
   [USER_FIELDS.clerk_id]: data.id,
   [USER_FIELDS.email]: primaryEmail,
-  [USER_FIELDS.full_name]: fullName,
+  [USER_FIELDS.full_name]: {
+    first_name: data.first_name || '',
+    last_name: data.last_name || ''
+  },
   [USER_FIELDS.subscription_status]: 'free',
   [USER_FIELDS.last_login]: new Date().toISOString()
 }
