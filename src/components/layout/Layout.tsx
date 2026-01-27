@@ -1,6 +1,7 @@
 /**
  * WorkProof Layout Component
  * Main app shell with navigation
+ * WCAG 2.1 AA Compliant
  */
 import { ReactNode, useCallback } from 'react'
 import Navigation from './Navigation'
@@ -15,7 +16,6 @@ interface LayoutProps {
 export default function Layout({ children }: LayoutProps) {
   const navigate = useNavigate()
   
-  // useAuth is safer - returns undefined values when outside ClerkProvider
   const { signOut, isLoaded } = useAuth()
 
   const handleTimeout = useCallback(async () => {
@@ -35,8 +35,16 @@ export default function Layout({ children }: LayoutProps) {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Skip Navigation - WCAG 2.4.1 */}
+      
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-blue-600 focus:text-white focus:rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+      >
+        Skip to main content
+      </a>
+
       {/* Main content */}
-      <main className="flex-1 pb-20">
+      <main id="main-content" className="flex-1 pb-20" tabIndex={-1}>
         <div className="max-w-lg mx-auto px-4 py-6">{children}</div>
       </main>
 
