@@ -2,10 +2,10 @@
  * WorkProof Jobs List
  * All jobs with filtering
  */
-
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
+import { useAuth } from '@clerk/clerk-react'
 import {
   Plus,
   Search,
@@ -16,8 +16,12 @@ import {
   CheckCircle,
   Clock,
   Archive,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react'
 import { trackPageView, trackError } from '../utils/analytics'
+import { jobsApi } from '../services/api'
+import { captureError } from '../utils/errorTracking'
 import type { Job, JobStatus } from '../types/models'
 
 const STATUS_CONFIG: Record<JobStatus, { label: string; color: string; icon: typeof Clock }> = {
@@ -27,11 +31,13 @@ const STATUS_CONFIG: Record<JobStatus, { label: string; color: string; icon: typ
 }
 
 export default function Jobs() {
+  const { getToken } = useAuth()
   const [jobs, setJobs] = useState<Job[]>([])
   const [filteredJobs, setFilteredJobs] = useState<Job[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<JobStatus | 'all'>('all')
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     trackPageView('/jobs', 'Jobs')
@@ -44,54 +50,26 @@ export default function Jobs() {
 
   const loadJobs = async () => {
     setIsLoading(true)
+    setError(null)
     try {
-      // TODO: Fetch from API
-      // Placeholder data
-      setJobs([
-        {
-          id: '1',
-          orgId: '1',
-          address: '42 High Street, Bristol BS1 2AW',
-          clientName: 'Mrs Johnson',
-          startDate: '2026-01-24',
-          status: 'active',
-          equipmentId: null,
-          createdAt: '2026-01-24T09:00:00Z',
-          taskCount: 1,
-          evidenceCount: 4,
-          completedEvidenceCount: 7,
-        },
-        {
-          id: '2',
-          orgId: '1',
-          address: 'The Crown Inn, Exeter EX1 1AA',
-          clientName: 'Mr Davies',
-          startDate: '2026-01-22',
-          status: 'active',
-          equipmentId: null,
-          createdAt: '2026-01-22T08:30:00Z',
-          taskCount: 2,
-          evidenceCount: 0,
-          completedEvidenceCount: 12,
-        },
-        {
-          id: '3',
-          orgId: '1',
-          address: 'Unit 7, Industrial Estate, Plymouth',
-          clientName: 'ABC Motors Ltd',
-          startDate: '2026-01-20',
-          status: 'completed',
-          equipmentId: null,
-          createdAt: '2026-01-20T10:00:00Z',
-          taskCount: 1,
-          evidenceCount: 6,
-          completedEvidenceCount: 6,
-        },
-      ])
-    } catch (error) {
-      console.error('Failed to load jobs:', error)
+      const token = await getToken()
+      const response = await jobsApi.list(token)
+      
+      if (response.error) {
+        setError(response.error)
+        trackError('api_error', 'jobs_load')
+        return
+      }
+      
+      if (response.data) {
+        setJobs(response.data)
+      }
+    } catch (err) {
+      const errorMessage = 'Failed to load jobs. Please try again.'
+      setError(errorMessage)
+      captureError(err, 'Jobs.loadJobs')
       trackError(
-        error instanceof Error ? error.name : 'unknown',
+        err instanceof Error ? err.name : 'unknown',
         'jobs_load'
       )
     } finally {
@@ -137,6 +115,23 @@ export default function Jobs() {
           </Link>
         </div>
 
+        {/* Error State */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-red-800 text-sm">{error}</p>
+              <button
+                onClick={loadJobs}
+                className="text-red-600 text-sm font-medium mt-2 flex items-center gap-1 hover:text-red-700"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Try again
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Search */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -146,11 +141,12 @@ export default function Jobs() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="input-field pl-10"
+            aria-label="Search jobs"
           />
         </div>
 
         {/* Filters */}
-        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-1">
+        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-1" role="group" aria-label="Filter jobs by status">
           <button
             onClick={() => setStatusFilter('all')}
             className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
@@ -158,6 +154,7 @@ export default function Jobs() {
                 ? 'bg-gray-900 text-white'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
+            aria-pressed={statusFilter === 'all'}
           >
             All
           </button>
@@ -170,6 +167,7 @@ export default function Jobs() {
                   ? 'bg-gray-900 text-white'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
+              aria-pressed={statusFilter === status}
             >
               {STATUS_CONFIG[status].label}
             </button>
@@ -178,7 +176,7 @@ export default function Jobs() {
 
         {/* Jobs List */}
         {isLoading ? (
-          <div className="space-y-3">
+          <div className="space-y-3" aria-busy="true" aria-label="Loading jobs">
             {[1, 2, 3].map((i) => (
               <div key={i} className="card animate-pulse">
                 <div className="h-5 bg-gray-200 rounded w-3/4 mb-2" />
@@ -191,7 +189,7 @@ export default function Jobs() {
           <div className="card text-center py-12">
             {searchQuery || statusFilter !== 'all' ? (
               <>
-                <Filter className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                <Filter className="w-12 h-12 text-gray-300 mx-auto mb-3" aria-hidden="true" />
                 <p className="text-gray-500 mb-2">No jobs found</p>
                 <button
                   onClick={() => {
@@ -205,17 +203,17 @@ export default function Jobs() {
               </>
             ) : (
               <>
-                <Calendar className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                <Calendar className="w-12 h-12 text-gray-300 mx-auto mb-3" aria-hidden="true" />
                 <p className="text-gray-500 mb-4">No jobs yet</p>
                 <Link to="/jobs/new" className="btn-primary inline-flex items-center gap-2">
-                  <Plus className="w-4 h-4" />
+                  <Plus className="w-4 h-4" aria-hidden="true" />
                   Create your first job
                 </Link>
               </>
             )}
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3" role="list" aria-label="Jobs list">
             {filteredJobs.map((job) => {
               const statusConfig = STATUS_CONFIG[job.status]
               const StatusIcon = statusConfig.icon
@@ -225,6 +223,7 @@ export default function Jobs() {
                   key={job.id}
                   to={`/jobs/${job.id}`}
                   className="card block hover:border-gray-300 transition-colors"
+                  role="listitem"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
@@ -235,17 +234,17 @@ export default function Jobs() {
                         <span
                           className={`badge badge-${statusConfig.color} flex items-center gap-1`}
                         >
-                          <StatusIcon className="w-3 h-3" />
+                          <StatusIcon className="w-3 h-3" aria-hidden="true" />
                           {statusConfig.label}
                         </span>
                       </div>
                       <div className="flex items-center gap-1 text-sm text-gray-500">
-                        <MapPin className="w-3 h-3 flex-shrink-0" />
+                        <MapPin className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
                         <span className="truncate">{job.address}</span>
                       </div>
                       <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
                         <div className="flex items-center gap-1">
-                          <Calendar className="w-3 h-3" />
+                          <Calendar className="w-3 h-3" aria-hidden="true" />
                           {new Date(job.startDate).toLocaleDateString('en-GB', {
                             day: 'numeric',
                             month: 'short',
@@ -263,7 +262,7 @@ export default function Jobs() {
                         </p>
                         <p className="text-xs text-gray-500">evidence</p>
                       </div>
-                      <ChevronRight className="w-5 h-5 text-gray-400" />
+                      <ChevronRight className="w-5 h-5 text-gray-400" aria-hidden="true" />
                     </div>
                   </div>
                 </Link>
