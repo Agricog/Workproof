@@ -2,26 +2,14 @@
  * WorkProof Login Page
  * Clerk authentication
  */
-
-import { useEffect } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { SignIn, useUser } from '@clerk/clerk-react'
+import { useSearchParams } from 'react-router-dom'
+import { SignIn } from '@clerk/clerk-react'
 import { Helmet } from 'react-helmet-async'
 import { Shield, AlertCircle } from 'lucide-react'
 
 export default function Login() {
-  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const { isSignedIn, isLoaded } = useUser()
-
   const reason = searchParams.get('reason')
-
-  // Redirect if already signed in
-  useEffect(() => {
-    if (isLoaded && isSignedIn) {
-      navigate('/dashboard')
-    }
-  }, [isLoaded, isSignedIn, navigate])
 
   return (
     <>
@@ -59,34 +47,22 @@ export default function Login() {
             )}
 
             {/* Clerk SignIn */}
-            <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8">
-              <h1 className="text-2xl font-bold text-gray-900 text-center mb-2">
-                Welcome back
-              </h1>
-              <p className="text-gray-600 text-center mb-8">
-                Sign in to continue to WorkProof
-              </p>
-
-              <SignIn
-  appearance={{
-    elements: {
-      rootBox: 'w-full',
-      card: 'shadow-none p-0',
-      headerTitle: 'hidden',
-      headerSubtitle: 'hidden',
-      formButtonPrimary:
-        'bg-green-600 hover:bg-green-700 text-white font-medium py-2.5 rounded-lg',
-      formFieldInput:
-        'border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500',
-      footerActionLink: 'text-green-600 hover:text-green-700',
-    },
-  }}
-  routing="path"
-  path="/login"
-  signUpUrl="/login"
-  forceRedirectUrl="/dashboard"
-/>
-            </div>
+            <SignIn
+              appearance={{
+                elements: {
+                  rootBox: 'w-full',
+                  card: 'shadow-lg border border-gray-200 rounded-2xl',
+                  formButtonPrimary:
+                    'bg-green-600 hover:bg-green-700 text-white font-medium py-2.5 rounded-lg',
+                  formFieldInput:
+                    'border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500',
+                  footerActionLink: 'text-green-600 hover:text-green-700',
+                },
+              }}
+              path="/login"
+              signUpUrl="/login"
+              fallbackRedirectUrl="/dashboard"
+            />
 
             {/* Back link */}
             <p className="text-center mt-6">
