@@ -48,14 +48,3 @@ export default function Layout({ children }: LayoutProps) {
     </div>
   )
 }
-```
-
-Wait - `useAuth` will also fail outside ClerkProvider. The real issue is the env variable not being set during build.
-
----
-
-### Actual Fix: Confirm Railway Variable Name
-
-In Railway, check that the variable is **exactly**:
-```
-VITE_CLERK_PUBLISHABLE_KEY
