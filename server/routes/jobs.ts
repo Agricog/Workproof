@@ -18,6 +18,26 @@ async function getUserRecordId(clerkId: string): Promise<string | null> {
   return user?.id || null
 }
 
+// Helper: Transform SmartSuite job record to readable format
+function transformJob(record: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: record.id,
+    title: record.title,
+    clientName: record[JOB_FIELDS.client_name] || record.title,
+    address: record[JOB_FIELDS.address] || '',
+    postcode: record[JOB_FIELDS.postcode] || '',
+    clientPhone: record[JOB_FIELDS.client_phone],
+    clientEmail: record[JOB_FIELDS.client_email],
+    status: record[JOB_FIELDS.status] || 'active',
+    startDate: record[JOB_FIELDS.start_date] || new Date().toISOString(),
+    completionDate: record[JOB_FIELDS.completion_date],
+    notes: record[JOB_FIELDS.notes],
+    createdAt: record[JOB_FIELDS.created_at],
+    // Also include raw for debugging
+    _raw: record
+  }
+}
+
 // List all jobs for current user
 jobs.get('/', async (c) => {
   const auth = getAuth(c)
@@ -54,8 +74,13 @@ jobs.get('/', async (c) => {
       offset
     })
 
+    // Transform each job to readable format
+    const transformedItems = result.items.map(item => 
+      transformJob(item as unknown as Record<string, unknown>)
+    )
+
     return c.json({
-      items: result.items,
+      items: transformedItems,
       total: result.total,
       limit,
       offset
@@ -64,36 +89,6 @@ jobs.get('/', async (c) => {
     console.error('Error listing jobs:', error)
     return c.json({ error: 'Failed to list jobs' }, 500)
   }
-})
-
-// Also support query param for job_id filter (used by frontend)
-jobs.get('/', async (c) => {
-  const auth = getAuth(c)
-  const client = getSmartSuiteClient()
-  const jobId = c.req.query('job_id')
-
-  // If job_id provided, return single job
-  if (jobId) {
-    try {
-      const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
-      const userRecordId = await getUserRecordId(auth.userId)
-      
-      // Check ownership - linked record field returns array
-      const jobUserIds = job[JOB_FIELDS.user as keyof Job] as string[] | string
-      const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
-      
-      if (!userIds.includes(userRecordId || '')) {
-        return c.json({ error: 'Forbidden' }, 403)
-      }
-
-      return c.json(job)
-    } catch (error) {
-      console.error('Error fetching job:', error)
-      return c.json({ error: 'Failed to fetch job' }, 500)
-    }
-  }
-
-  // Default: list all jobs (handled by first route)
 })
 
 // Get single job by ID
@@ -114,7 +109,10 @@ jobs.get('/:id', async (c) => {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    return c.json(job)
+    // Transform to readable format
+    const transformed = transformJob(job as unknown as Record<string, unknown>)
+
+    return c.json(transformed)
   } catch (error) {
     console.error('Error fetching job:', error)
     return c.json({ error: 'Failed to fetch job' }, 500)
@@ -182,7 +180,10 @@ jobs.post('/', async (c) => {
 
     const job = await client.createRecord<Job>(TABLES.JOBS, jobData as Omit<Job, 'id'>)
 
-    return c.json(job, 201)
+    // Transform to readable format
+    const transformed = transformJob(job as unknown as Record<string, unknown>)
+
+    return c.json(transformed, 201)
   } catch (error) {
     console.error('Error creating job:', error)
     return c.json({ error: 'Failed to create job' }, 500)
@@ -236,7 +237,10 @@ jobs.patch('/:id', async (c) => {
       updateData as Partial<Job>
     )
 
-    return c.json(updatedJob)
+    // Transform to readable format
+    const transformed = transformJob(updatedJob as unknown as Record<string, unknown>)
+
+    return c.json(transformed)
   } catch (error) {
     console.error('Error updating job:', error)
     return c.json({ error: 'Failed to update job' }, 500)
@@ -290,7 +294,10 @@ jobs.put('/:id', async (c) => {
       updateData as Partial<Job>
     )
 
-    return c.json(updatedJob)
+    // Transform to readable format
+    const transformed = transformJob(updatedJob as unknown as Record<string, unknown>)
+
+    return c.json(transformed)
   } catch (error) {
     console.error('Error updating job:', error)
     return c.json({ error: 'Failed to update job' }, 500)
