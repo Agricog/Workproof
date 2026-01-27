@@ -18,6 +18,14 @@ async function getUserRecordId(clerkId: string): Promise<string | null> {
   return user?.id || null
 }
 
+// Helper: Check if user owns the job
+function userOwnsJob(job: Record<string, unknown>, userRecordId: string): boolean {
+  const jobUserIds = job[JOB_FIELDS.user] as string[] | string | undefined
+  if (!jobUserIds) return false
+  const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
+  return userIds.includes(userRecordId)
+}
+
 // Helper: Verify user owns the job
 async function verifyJobOwnership(jobId: string, clerkId: string): Promise<boolean> {
   const client = getSmartSuiteClient()
@@ -27,13 +35,18 @@ async function verifyJobOwnership(jobId: string, clerkId: string): Promise<boole
 
   try {
     const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
-    // Linked record field may return array
-    const jobUserIds = job[JOB_FIELDS.user as keyof Job] as string[] | string
-    const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
-    return userIds.includes(userRecordId)
+    return userOwnsJob(job as unknown as Record<string, unknown>, userRecordId)
   } catch {
     return false
   }
+}
+
+// Helper: Check if task belongs to job
+function taskBelongsToJob(task: Record<string, unknown>, jobId: string): boolean {
+  const taskJobIds = task[TASK_FIELDS.job] as string[] | string | undefined
+  if (!taskJobIds) return false
+  const jobIds = Array.isArray(taskJobIds) ? taskJobIds : [taskJobIds]
+  return jobIds.includes(jobId)
 }
 
 // Helper: Transform SmartSuite task record to readable format
@@ -54,9 +67,7 @@ function transformTask(record: Record<string, unknown>): Record<string, unknown>
     completedAt: record[TASK_FIELDS.completed_at],
     // Default evidence counts (will be updated when evidence is loaded)
     evidenceCount: 0,
-    requiredEvidenceCount: 5,
-    // Also include raw for debugging
-    _raw: record
+    requiredEvidenceCount: 5
   }
 }
 
@@ -77,35 +88,41 @@ tasks.get('/', async (c) => {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    // Get query params
+    // Fetch all tasks (SmartSuite linked record fields don't support comparison operators)
+    // Then filter in memory by job ID
+    const result = await client.listRecords<Task>(TABLES.TASKS, {
+      limit: 200
+    })
+
+    // Filter by job ID in memory
+    let filteredItems = result.items.filter(item =>
+      taskBelongsToJob(item as unknown as Record<string, unknown>, jobId)
+    )
+
+    // Apply status filter if provided
     const status = c.req.query('status')
-
-    // Build filter using field IDs
-    // Linked record fields need 'has_any' comparison
-    const filterFields: Array<{ field: string; comparison: string; value: unknown }> = [
-      { field: TASK_FIELDS.job, comparison: 'has_any', value: [jobId] }
-    ]
-
     if (status) {
-      filterFields.push({ field: TASK_FIELDS.status, comparison: 'is', value: status })
+      filteredItems = filteredItems.filter(item => {
+        const taskStatus = (item as unknown as Record<string, unknown>)[TASK_FIELDS.status]
+        return taskStatus === status
+      })
     }
 
-    const result = await client.listRecords<Task>(TABLES.TASKS, {
-      filter: {
-        operator: 'and',
-        fields: filterFields
-      },
-      sort: [{ field: TASK_FIELDS.order, direction: 'asc' }]
+    // Sort by order ascending
+    filteredItems.sort((a, b) => {
+      const aOrder = ((a as unknown as Record<string, unknown>)[TASK_FIELDS.order] as number) || 0
+      const bOrder = ((b as unknown as Record<string, unknown>)[TASK_FIELDS.order] as number) || 0
+      return aOrder - bOrder
     })
 
     // Transform each task to readable format
-    const transformedItems = result.items.map(item =>
+    const transformedItems = filteredItems.map(item =>
       transformTask(item as unknown as Record<string, unknown>)
     )
 
     return c.json({
       items: transformedItems,
-      total: result.total
+      total: transformedItems.length
     })
   } catch (error) {
     console.error('Error listing tasks:', error)
@@ -126,34 +143,40 @@ tasks.get('/job/:jobId', async (c) => {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    // Get query params
+    // Fetch all tasks and filter in memory
+    const result = await client.listRecords<Task>(TABLES.TASKS, {
+      limit: 200
+    })
+
+    // Filter by job ID in memory
+    let filteredItems = result.items.filter(item =>
+      taskBelongsToJob(item as unknown as Record<string, unknown>, jobId)
+    )
+
+    // Apply status filter if provided
     const status = c.req.query('status')
-
-    // Build filter using field IDs
-    const filterFields: Array<{ field: string; comparison: string; value: unknown }> = [
-      { field: TASK_FIELDS.job, comparison: 'has_any', value: [jobId] }
-    ]
-
     if (status) {
-      filterFields.push({ field: TASK_FIELDS.status, comparison: 'is', value: status })
+      filteredItems = filteredItems.filter(item => {
+        const taskStatus = (item as unknown as Record<string, unknown>)[TASK_FIELDS.status]
+        return taskStatus === status
+      })
     }
 
-    const result = await client.listRecords<Task>(TABLES.TASKS, {
-      filter: {
-        operator: 'and',
-        fields: filterFields
-      },
-      sort: [{ field: TASK_FIELDS.order, direction: 'asc' }]
+    // Sort by order ascending
+    filteredItems.sort((a, b) => {
+      const aOrder = ((a as unknown as Record<string, unknown>)[TASK_FIELDS.order] as number) || 0
+      const bOrder = ((b as unknown as Record<string, unknown>)[TASK_FIELDS.order] as number) || 0
+      return aOrder - bOrder
     })
 
     // Transform each task to readable format
-    const transformedItems = result.items.map(item =>
+    const transformedItems = filteredItems.map(item =>
       transformTask(item as unknown as Record<string, unknown>)
     )
 
     return c.json({
       items: transformedItems,
-      total: result.total
+      total: transformedItems.length
     })
   } catch (error) {
     console.error('Error listing tasks:', error)
@@ -213,14 +236,12 @@ tasks.post('/', async (c) => {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    // Get next order number
-    const existingTasks = await client.listRecords<Task>(TABLES.TASKS, {
-      filter: {
-        operator: 'and',
-        fields: [{ field: TASK_FIELDS.job, comparison: 'has_any', value: [jobId] }]
-      }
-    })
-    const order = existingTasks.total + 1
+    // Get existing tasks for order number
+    const allTasks = await client.listRecords<Task>(TABLES.TASKS, { limit: 200 })
+    const jobTasks = allTasks.items.filter(item =>
+      taskBelongsToJob(item as unknown as Record<string, unknown>, jobId)
+    )
+    const order = jobTasks.length + 1
 
     // Create task with SmartSuite field IDs
     // Linked record fields need array value
