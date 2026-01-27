@@ -29,6 +29,7 @@ export default function TaskDetail() {
   const taskId = params.taskId
   const navigate = useNavigate()
   const { getToken } = useAuth()
+
   const [task, setTask] = useState<Task | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -51,6 +52,7 @@ export default function TaskDetail() {
 
       // Fetch task details
       const taskResponse = await tasksApi.get(taskId, token)
+
       if (taskResponse.error) {
         setError(taskResponse.error)
         trackError('api_error', 'task_detail_load')
@@ -61,16 +63,31 @@ export default function TaskDetail() {
         setTask(taskResponse.data)
 
         // Fetch existing evidence for this task
-        const evidenceResponse = await evidenceApi.listByTask(taskId, token)
-        if (evidenceResponse.data) {
-          // Mark captured evidence types
-          const captured: Record<string, boolean> = {}
-          evidenceResponse.data.forEach((ev) => {
-            if (ev.evidenceType) {
-              captured[ev.evidenceType] = true
+        try {
+          const evidenceResponse = await evidenceApi.listByTask(taskId, token)
+          if (evidenceResponse.data) {
+            // Handle both array and paginated response
+            const evidenceData = evidenceResponse.data as unknown
+            let evidenceItems: Array<{ evidenceType?: string }> = []
+            
+            if (Array.isArray(evidenceData)) {
+              evidenceItems = evidenceData
+            } else if (evidenceData && typeof evidenceData === 'object' && 'items' in evidenceData) {
+              evidenceItems = (evidenceData as { items: Array<{ evidenceType?: string }> }).items || []
             }
-          })
-          setCapturedEvidence(captured)
+            
+            // Mark captured evidence types
+            const captured: Record<string, boolean> = {}
+            evidenceItems.forEach((ev) => {
+              if (ev.evidenceType) {
+                captured[ev.evidenceType] = true
+              }
+            })
+            setCapturedEvidence(captured)
+          }
+        } catch (evidenceErr) {
+          // Evidence API might not exist yet - continue without it
+          console.log('Evidence API not available:', evidenceErr)
         }
       }
     } catch (err) {
@@ -133,6 +150,7 @@ export default function TaskDetail() {
         return updated
       })
     }
+
     setShowCamera(false)
     setSelectedEvidenceType(null)
 
@@ -185,7 +203,8 @@ export default function TaskDetail() {
   }
 
   const config = getTaskTypeConfig(task.taskType)
-  const statusConfig = TASK_STATUS_CONFIG[task.status]
+  const taskStatus = (task.status || 'pending') as TaskStatus
+  const statusConfig = TASK_STATUS_CONFIG[taskStatus] || TASK_STATUS_CONFIG.pending
 
   if (showCamera && selectedEvidenceType) {
     return (
@@ -287,3 +306,4 @@ export default function TaskDetail() {
     </div>
   )
 }
+
