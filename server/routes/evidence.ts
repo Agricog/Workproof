@@ -42,7 +42,7 @@ async function verifyTaskOwnership(taskId: string, clerkId: string): Promise<boo
     if (!jobId) return false
 
     // Get job to verify ownership
-    const job = await client.getRecord<Record<string, unknown>>(TABLES.JOBS, jobId)
+    const job = await client.getRecord(TABLES.JOBS, jobId) as unknown as Record<string, unknown>
     const jobUserIds = job['s11e8c3905'] as string[] | string | undefined // JOB_FIELDS.user
     if (!jobUserIds) return false
     
@@ -152,7 +152,6 @@ evidence.post('/upload-url', async (c) => {
   try {
     const body = await c.req.json() as Record<string, unknown>
     const filename = body.filename as string
-    const contentType = (body.content_type || body.contentType || 'image/jpeg') as string
 
     if (!filename) {
       return c.json({ error: 'Missing filename' }, 400)
