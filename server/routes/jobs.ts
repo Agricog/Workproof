@@ -18,8 +18,27 @@ async function getUserRecordId(clerkId: string): Promise<string | null> {
   return user?.id || null
 }
 
+// Helper: Check if user owns the job
+function userOwnsJob(job: Record<string, unknown>, userRecordId: string): boolean {
+  const jobUserIds = job[JOB_FIELDS.user] as string[] | string | undefined
+  if (!jobUserIds) return false
+  const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
+  return userIds.includes(userRecordId)
+}
+
 // Helper: Transform SmartSuite job record to readable format
 function transformJob(record: Record<string, unknown>): Record<string, unknown> {
+  // Handle date field - may be object with date property
+  const startDateRaw = record[JOB_FIELDS.start_date]
+  let startDate: string
+  if (startDateRaw && typeof startDateRaw === 'object' && 'date' in startDateRaw) {
+    startDate = (startDateRaw as { date: string }).date
+  } else if (typeof startDateRaw === 'string') {
+    startDate = startDateRaw
+  } else {
+    startDate = new Date().toISOString().split('T')[0]
+  }
+
   return {
     id: record.id,
     title: record.title,
@@ -29,12 +48,10 @@ function transformJob(record: Record<string, unknown>): Record<string, unknown> 
     clientPhone: record[JOB_FIELDS.client_phone],
     clientEmail: record[JOB_FIELDS.client_email],
     status: record[JOB_FIELDS.status] || 'active',
-    startDate: record[JOB_FIELDS.start_date] || new Date().toISOString(),
+    startDate: startDate,
     completionDate: record[JOB_FIELDS.completion_date],
     notes: record[JOB_FIELDS.notes],
-    createdAt: record[JOB_FIELDS.created_at],
-    // Also include raw for debugging
-    _raw: record
+    createdAt: record[JOB_FIELDS.created_at]
   }
 }
 
@@ -51,39 +68,43 @@ jobs.get('/', async (c) => {
 
     // Get query params for filtering
     const status = c.req.query('status')
-    const limit = parseInt(c.req.query('limit') || '50')
-    const offset = parseInt(c.req.query('offset') || '0')
 
-    // Build filter using field IDs
-    // Note: Linked record fields need 'has_any' comparison with array value
-    const filterFields: Array<{ field: string; comparison: string; value: unknown }> = [
-      { field: JOB_FIELDS.user, comparison: 'has_any', value: [userRecordId] }
-    ]
+    // Fetch all jobs (SmartSuite linked record fields don't support comparison operators)
+    // Then filter in memory
+    const result = await client.listRecords<Job>(TABLES.JOBS, {
+      limit: 100
+    })
 
+    // Filter by user ownership in memory
+    let filteredItems = result.items.filter(item => 
+      userOwnsJob(item as unknown as Record<string, unknown>, userRecordId)
+    )
+
+    // Apply status filter if provided
     if (status) {
-      filterFields.push({ field: JOB_FIELDS.status, comparison: 'is', value: status })
+      filteredItems = filteredItems.filter(item => {
+        const jobStatus = (item as unknown as Record<string, unknown>)[JOB_FIELDS.status]
+        return jobStatus === status
+      })
     }
 
-    const result = await client.listRecords<Job>(TABLES.JOBS, {
-      filter: {
-        operator: 'and',
-        fields: filterFields
-      },
-      sort: [{ field: JOB_FIELDS.created_at, direction: 'desc' }],
-      limit,
-      offset
+    // Sort by created_at descending
+    filteredItems.sort((a, b) => {
+      const aDate = (a as unknown as Record<string, unknown>)[JOB_FIELDS.created_at] as string || ''
+      const bDate = (b as unknown as Record<string, unknown>)[JOB_FIELDS.created_at] as string || ''
+      return bDate.localeCompare(aDate)
     })
 
     // Transform each job to readable format
-    const transformedItems = result.items.map(item => 
+    const transformedItems = filteredItems.map(item => 
       transformJob(item as unknown as Record<string, unknown>)
     )
 
     return c.json({
       items: transformedItems,
-      total: result.total,
-      limit,
-      offset
+      total: transformedItems.length,
+      limit: 100,
+      offset: 0
     })
   } catch (error) {
     console.error('Error listing jobs:', error)
@@ -100,12 +121,9 @@ jobs.get('/:id', async (c) => {
   try {
     const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
 
-    // Verify ownership - linked record field may return array
+    // Verify ownership
     const userRecordId = await getUserRecordId(auth.userId)
-    const jobUserIds = job[JOB_FIELDS.user as keyof Job] as string[] | string
-    const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
-    
-    if (!userIds.includes(userRecordId || '')) {
+    if (!userRecordId || !userOwnsJob(job as unknown as Record<string, unknown>, userRecordId)) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
@@ -155,6 +173,9 @@ jobs.post('/', async (c) => {
     const timestamp = Date.now()
     const jobTitle = title || `${clientName} - ${address} (${timestamp})`
 
+    // Format date for SmartSuite (expects object with date property)
+    const formattedStartDate = startDate || new Date().toISOString().split('T')[0]
+
     // Create job with SmartSuite field IDs
     // Linked record fields need array value
     const jobData: Record<string, unknown> = {
@@ -164,7 +185,7 @@ jobs.post('/', async (c) => {
       [JOB_FIELDS.postcode]: postcode?.toUpperCase() || '',
       [JOB_FIELDS.client_name]: clientName,
       [JOB_FIELDS.status]: 'active',
-      [JOB_FIELDS.start_date]: startDate || new Date().toISOString().split('T')[0]
+      [JOB_FIELDS.start_date]: { date: formattedStartDate }
     }
 
     // Add optional fields if provided
@@ -201,10 +222,7 @@ jobs.patch('/:id', async (c) => {
     const existingJob = await client.getRecord<Job>(TABLES.JOBS, jobId)
     const userRecordId = await getUserRecordId(auth.userId)
     
-    const jobUserIds = existingJob[JOB_FIELDS.user as keyof Job] as string[] | string
-    const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
-    
-    if (!userIds.includes(userRecordId || '')) {
+    if (!userRecordId || !userOwnsJob(existingJob as unknown as Record<string, unknown>, userRecordId)) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
@@ -223,8 +241,8 @@ jobs.patch('/:id', async (c) => {
     if (body.client_email !== undefined) updateData[JOB_FIELDS.client_email] = body.client_email
     if (body.clientEmail !== undefined) updateData[JOB_FIELDS.client_email] = body.clientEmail
     if (body.status !== undefined) updateData[JOB_FIELDS.status] = body.status
-    if (body.completion_date !== undefined) updateData[JOB_FIELDS.completion_date] = body.completion_date
-    if (body.completionDate !== undefined) updateData[JOB_FIELDS.completion_date] = body.completionDate
+    if (body.completion_date !== undefined) updateData[JOB_FIELDS.completion_date] = { date: body.completion_date }
+    if (body.completionDate !== undefined) updateData[JOB_FIELDS.completion_date] = { date: body.completionDate }
     if (body.notes !== undefined) updateData[JOB_FIELDS.notes] = body.notes
 
     if (Object.keys(updateData).length === 0) {
@@ -258,10 +276,7 @@ jobs.put('/:id', async (c) => {
     const existingJob = await client.getRecord<Job>(TABLES.JOBS, jobId)
     const userRecordId = await getUserRecordId(auth.userId)
     
-    const jobUserIds = existingJob[JOB_FIELDS.user as keyof Job] as string[] | string
-    const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
-    
-    if (!userIds.includes(userRecordId || '')) {
+    if (!userRecordId || !userOwnsJob(existingJob as unknown as Record<string, unknown>, userRecordId)) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
@@ -280,8 +295,8 @@ jobs.put('/:id', async (c) => {
     if (body.client_email !== undefined) updateData[JOB_FIELDS.client_email] = body.client_email
     if (body.clientEmail !== undefined) updateData[JOB_FIELDS.client_email] = body.clientEmail
     if (body.status !== undefined) updateData[JOB_FIELDS.status] = body.status
-    if (body.completion_date !== undefined) updateData[JOB_FIELDS.completion_date] = body.completion_date
-    if (body.completionDate !== undefined) updateData[JOB_FIELDS.completion_date] = body.completionDate
+    if (body.completion_date !== undefined) updateData[JOB_FIELDS.completion_date] = { date: body.completion_date }
+    if (body.completionDate !== undefined) updateData[JOB_FIELDS.completion_date] = { date: body.completionDate }
     if (body.notes !== undefined) updateData[JOB_FIELDS.notes] = body.notes
 
     if (Object.keys(updateData).length === 0) {
@@ -315,10 +330,7 @@ jobs.delete('/:id', async (c) => {
     const existingJob = await client.getRecord<Job>(TABLES.JOBS, jobId)
     const userRecordId = await getUserRecordId(auth.userId)
     
-    const jobUserIds = existingJob[JOB_FIELDS.user as keyof Job] as string[] | string
-    const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
-    
-    if (!userIds.includes(userRecordId || '')) {
+    if (!userRecordId || !userOwnsJob(existingJob as unknown as Record<string, unknown>, userRecordId)) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
