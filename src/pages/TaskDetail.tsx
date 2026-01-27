@@ -24,6 +24,9 @@ const TASK_STATUS_CONFIG: Record<TaskStatus, { label: string; color: string }> =
 }
 
 export default function TaskDetail() {
+  const params = useParams<{ jobId: string; taskId: string }>()
+  const jobId = params.jobId
+  const taskId = params.taskId
   const navigate = useNavigate()
   const { getToken } = useAuth()
   const [task, setTask] = useState<Task | null>(null)
@@ -189,7 +192,7 @@ export default function TaskDetail() {
       <PhotoCapture
         evidenceType={selectedEvidenceType}
         taskId={task.id}
-        jobId={task.jobId}
+        jobId={jobId || task.jobId}
         workerId={task.workerId}
         label={config.label}
         onCapture={handleCaptureComplete}
