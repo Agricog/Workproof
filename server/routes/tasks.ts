@@ -55,11 +55,39 @@ function transformTask(record: Record<string, unknown>): Record<string, unknown>
   const jobValue = record[TASK_FIELDS.job] as string[] | string | undefined
   const jobId = Array.isArray(jobValue) ? jobValue[0] : jobValue
 
+  // Task type might be string, object with value, or from title
+  let taskType = record[TASK_FIELDS.task_type]
+  
+  // Handle different formats SmartSuite might return
+  if (typeof taskType === 'object' && taskType !== null) {
+    // Might be { value: 'type' } or { label: 'type' }
+    taskType = (taskType as Record<string, unknown>).value || 
+               (taskType as Record<string, unknown>).label || 
+               'unknown'
+  }
+  
+  // If still no taskType, try to extract from title
+  if (!taskType || taskType === 'unknown') {
+    const title = record.title as string
+    if (title && title.includes(' - Task')) {
+      taskType = title.split(' - Task')[0]
+    }
+  }
+
+  // Log for debugging (remove later)
+  if (!taskType || taskType === 'unknown') {
+    console.log('Task type debug:', {
+      fieldValue: record[TASK_FIELDS.task_type],
+      title: record.title,
+      allFields: Object.keys(record)
+    })
+  }
+
   return {
     id: record.id,
     title: record.title,
     jobId: jobId || '',
-    taskType: record[TASK_FIELDS.task_type] || 'unknown',
+    taskType: taskType || 'unknown',
     status: record[TASK_FIELDS.status] || 'pending',
     order: record[TASK_FIELDS.order] || 0,
     notes: record[TASK_FIELDS.notes],
