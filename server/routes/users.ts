@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getSmartSuiteClient, TABLES } from '../lib/smartsuite.js'
+import { USER_FIELDS } from '../lib/smartsuite-fields.js'
 import { authMiddleware, getAuth } from '../middleware/auth.js'
 import { rateLimitMiddleware } from '../middleware/rateLimit.js'
 import type { User } from '../types/index.js'
@@ -18,7 +19,7 @@ users.get('/me', async (c) => {
   try {
     const user = await client.findByField<User>(
       TABLES.USERS,
-      'clerk_id',
+      USER_FIELDS.clerk_id,
       auth.userId
     )
 
@@ -42,7 +43,7 @@ users.patch('/me', async (c) => {
     // Find existing user
     const existingUser = await client.findByField<User>(
       TABLES.USERS,
-      'clerk_id',
+      USER_FIELDS.clerk_id,
       auth.userId
     )
 
@@ -53,18 +54,22 @@ users.patch('/me', async (c) => {
     // Get update data from request body
     const body = await c.req.json()
 
-    // Only allow updating specific fields
-    const allowedFields = [
-      'full_name',
-      'company_name',
-      'niceic_number',
-      'phone'
-    ]
+    // Map request fields to SmartSuite field IDs
+    const fieldMapping: Record<string, string> = {
+      full_name: USER_FIELDS.full_name,
+      fullName: USER_FIELDS.full_name,
+      company_name: USER_FIELDS.company_name,
+      companyName: USER_FIELDS.company_name,
+      niceic_number: USER_FIELDS.niceic_number,
+      niceicNumber: USER_FIELDS.niceic_number,
+      phone: USER_FIELDS.phone
+    }
 
-    const updateData: Partial<User> = {}
-    for (const field of allowedFields) {
-      if (body[field] !== undefined) {
-        updateData[field as keyof User] = body[field]
+    const updateData: Record<string, unknown> = {}
+    
+    for (const [requestField, smartsuiteField] of Object.entries(fieldMapping)) {
+      if (body[requestField] !== undefined) {
+        updateData[smartsuiteField] = body[requestField]
       }
     }
 
@@ -75,7 +80,7 @@ users.patch('/me', async (c) => {
     const updatedUser = await client.updateRecord<User>(
       TABLES.USERS,
       existingUser.id,
-      updateData
+      updateData as Partial<User>
     )
 
     return c.json(updatedUser)
@@ -95,7 +100,8 @@ users.get('/:id', async (c) => {
     const user = await client.getRecord<User>(TABLES.USERS, userId)
 
     // For now, users can only view their own profile
-    if (user.clerk_id !== auth.userId) {
+    const userClerkId = user[USER_FIELDS.clerk_id as keyof User]
+    if (userClerkId !== auth.userId) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
