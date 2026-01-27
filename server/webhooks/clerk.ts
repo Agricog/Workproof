@@ -107,7 +107,7 @@ async function handleUserCreated(data: ClerkWebhookEvent['data']) {
     return
   }
 
-  /// Create new user in SmartSuite using field IDs
+// Create new user in SmartSuite using field IDs
 const userData = {
   title: fullName,
   [USER_FIELDS.clerk_id]: data.id,
