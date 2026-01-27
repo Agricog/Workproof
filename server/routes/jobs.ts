@@ -3,7 +3,7 @@ import { getSmartSuiteClient, TABLES } from '../lib/smartsuite.js'
 import { USER_FIELDS, JOB_FIELDS } from '../lib/smartsuite-fields.js'
 import { authMiddleware, getAuth } from '../middleware/auth.js'
 import { rateLimitMiddleware } from '../middleware/rateLimit.js'
-import type { Job, User, CreateJobRequest, UpdateJobRequest } from '../types/index.js'
+import type { Job, User } from '../types/index.js'
 
 const jobs = new Hono()
 
@@ -100,36 +100,47 @@ jobs.post('/', async (c) => {
       return c.json({ error: 'User not found' }, 404)
     }
 
-    const body = await c.req.json() as CreateJobRequest
+    // Parse body as generic object to handle both camelCase and snake_case
+    const body = await c.req.json() as Record<string, unknown>
 
-    // Validate required fields (using request field names)
-    if (!body.address) {
+    // Get values supporting both camelCase and snake_case
+    const address = body.address as string | undefined
+    const clientName = (body.clientName || body.client_name) as string | undefined
+    const startDate = (body.startDate || body.start_date) as string | undefined
+    const postcode = body.postcode as string | undefined
+    const title = body.title as string | undefined
+    const clientPhone = (body.clientPhone || body.client_phone) as string | undefined
+    const clientEmail = (body.clientEmail || body.client_email) as string | undefined
+    const notes = body.notes as string | undefined
+
+    // Validate required fields
+    if (!address) {
       return c.json({ error: 'Missing required field: address' }, 400)
     }
-    if (!body.clientName && !body.client_name) {
+    if (!clientName) {
       return c.json({ error: 'Missing required field: client_name' }, 400)
     }
 
     // Create job with SmartSuite field IDs
     const jobData: Record<string, unknown> = {
-      title: body.title || `${body.clientName || body.client_name} - ${body.address}`,
+      title: title || `${clientName} - ${address}`,
       [JOB_FIELDS.user]: userRecordId,
-      [JOB_FIELDS.address]: body.address,
-      [JOB_FIELDS.postcode]: body.postcode?.toUpperCase() || '',
-      [JOB_FIELDS.client_name]: body.clientName || body.client_name,
+      [JOB_FIELDS.address]: address,
+      [JOB_FIELDS.postcode]: postcode?.toUpperCase() || '',
+      [JOB_FIELDS.client_name]: clientName,
       [JOB_FIELDS.status]: 'active',
-      [JOB_FIELDS.start_date]: body.startDate || body.start_date || new Date().toISOString().split('T')[0]
+      [JOB_FIELDS.start_date]: startDate || new Date().toISOString().split('T')[0]
     }
 
     // Add optional fields if provided
-    if (body.client_phone || body.clientPhone) {
-      jobData[JOB_FIELDS.client_phone] = body.client_phone || body.clientPhone
+    if (clientPhone) {
+      jobData[JOB_FIELDS.client_phone] = clientPhone
     }
-    if (body.client_email || body.clientEmail) {
-      jobData[JOB_FIELDS.client_email] = body.client_email || body.clientEmail
+    if (clientEmail) {
+      jobData[JOB_FIELDS.client_email] = clientEmail
     }
-    if (body.notes) {
-      jobData[JOB_FIELDS.notes] = body.notes
+    if (notes) {
+      jobData[JOB_FIELDS.notes] = notes
     }
 
     const job = await client.createRecord<Job>(TABLES.JOBS, jobData as Omit<Job, 'id'>)
@@ -141,7 +152,7 @@ jobs.post('/', async (c) => {
   }
 })
 
-// Update job
+// Update job (PATCH)
 jobs.patch('/:id', async (c) => {
   const auth = getAuth(c)
   const jobId = c.req.param('id')
@@ -157,38 +168,24 @@ jobs.patch('/:id', async (c) => {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    const body = await c.req.json() as UpdateJobRequest
+    const body = await c.req.json() as Record<string, unknown>
 
-    // Map request fields to SmartSuite field IDs
-    const fieldMapping: Record<string, string> = {
-      title: 'title',
-      address: JOB_FIELDS.address,
-      postcode: JOB_FIELDS.postcode,
-      client_name: JOB_FIELDS.client_name,
-      clientName: JOB_FIELDS.client_name,
-      client_phone: JOB_FIELDS.client_phone,
-      clientPhone: JOB_FIELDS.client_phone,
-      client_email: JOB_FIELDS.client_email,
-      clientEmail: JOB_FIELDS.client_email,
-      status: JOB_FIELDS.status,
-      completion_date: JOB_FIELDS.completion_date,
-      completionDate: JOB_FIELDS.completion_date,
-      notes: JOB_FIELDS.notes
-    }
-
+    // Map request fields to SmartSuite field IDs (support both cases)
     const updateData: Record<string, unknown> = {}
     
-    for (const [requestField, smartsuiteField] of Object.entries(fieldMapping)) {
-      const value = body[requestField as keyof UpdateJobRequest]
-      if (value !== undefined) {
-        // Uppercase postcode
-        if (requestField === 'postcode' && typeof value === 'string') {
-          updateData[smartsuiteField] = value.toUpperCase()
-        } else {
-          updateData[smartsuiteField] = value
-        }
-      }
-    }
+    if (body.title !== undefined) updateData.title = body.title
+    if (body.address !== undefined) updateData[JOB_FIELDS.address] = body.address
+    if (body.postcode !== undefined) updateData[JOB_FIELDS.postcode] = (body.postcode as string).toUpperCase()
+    if (body.client_name !== undefined) updateData[JOB_FIELDS.client_name] = body.client_name
+    if (body.clientName !== undefined) updateData[JOB_FIELDS.client_name] = body.clientName
+    if (body.client_phone !== undefined) updateData[JOB_FIELDS.client_phone] = body.client_phone
+    if (body.clientPhone !== undefined) updateData[JOB_FIELDS.client_phone] = body.clientPhone
+    if (body.client_email !== undefined) updateData[JOB_FIELDS.client_email] = body.client_email
+    if (body.clientEmail !== undefined) updateData[JOB_FIELDS.client_email] = body.clientEmail
+    if (body.status !== undefined) updateData[JOB_FIELDS.status] = body.status
+    if (body.completion_date !== undefined) updateData[JOB_FIELDS.completion_date] = body.completion_date
+    if (body.completionDate !== undefined) updateData[JOB_FIELDS.completion_date] = body.completionDate
+    if (body.notes !== undefined) updateData[JOB_FIELDS.notes] = body.notes
 
     if (Object.keys(updateData).length === 0) {
       return c.json({ error: 'No valid fields to update' }, 400)
@@ -207,7 +204,7 @@ jobs.patch('/:id', async (c) => {
   }
 })
 
-// Also support PUT for updates
+// Update job (PUT)
 jobs.put('/:id', async (c) => {
   const auth = getAuth(c)
   const jobId = c.req.param('id')
@@ -223,38 +220,24 @@ jobs.put('/:id', async (c) => {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    const body = await c.req.json() as UpdateJobRequest
+    const body = await c.req.json() as Record<string, unknown>
 
-    // Map request fields to SmartSuite field IDs
-    const fieldMapping: Record<string, string> = {
-      title: 'title',
-      address: JOB_FIELDS.address,
-      postcode: JOB_FIELDS.postcode,
-      client_name: JOB_FIELDS.client_name,
-      clientName: JOB_FIELDS.client_name,
-      client_phone: JOB_FIELDS.client_phone,
-      clientPhone: JOB_FIELDS.client_phone,
-      client_email: JOB_FIELDS.client_email,
-      clientEmail: JOB_FIELDS.client_email,
-      status: JOB_FIELDS.status,
-      completion_date: JOB_FIELDS.completion_date,
-      completionDate: JOB_FIELDS.completion_date,
-      notes: JOB_FIELDS.notes
-    }
-
+    // Map request fields to SmartSuite field IDs (support both cases)
     const updateData: Record<string, unknown> = {}
     
-    for (const [requestField, smartsuiteField] of Object.entries(fieldMapping)) {
-      const value = body[requestField as keyof UpdateJobRequest]
-      if (value !== undefined) {
-        // Uppercase postcode
-        if (requestField === 'postcode' && typeof value === 'string') {
-          updateData[smartsuiteField] = value.toUpperCase()
-        } else {
-          updateData[smartsuiteField] = value
-        }
-      }
-    }
+    if (body.title !== undefined) updateData.title = body.title
+    if (body.address !== undefined) updateData[JOB_FIELDS.address] = body.address
+    if (body.postcode !== undefined) updateData[JOB_FIELDS.postcode] = (body.postcode as string).toUpperCase()
+    if (body.client_name !== undefined) updateData[JOB_FIELDS.client_name] = body.client_name
+    if (body.clientName !== undefined) updateData[JOB_FIELDS.client_name] = body.clientName
+    if (body.client_phone !== undefined) updateData[JOB_FIELDS.client_phone] = body.client_phone
+    if (body.clientPhone !== undefined) updateData[JOB_FIELDS.client_phone] = body.clientPhone
+    if (body.client_email !== undefined) updateData[JOB_FIELDS.client_email] = body.client_email
+    if (body.clientEmail !== undefined) updateData[JOB_FIELDS.client_email] = body.clientEmail
+    if (body.status !== undefined) updateData[JOB_FIELDS.status] = body.status
+    if (body.completion_date !== undefined) updateData[JOB_FIELDS.completion_date] = body.completion_date
+    if (body.completionDate !== undefined) updateData[JOB_FIELDS.completion_date] = body.completionDate
+    if (body.notes !== undefined) updateData[JOB_FIELDS.notes] = body.notes
 
     if (Object.keys(updateData).length === 0) {
       return c.json({ error: 'No valid fields to update' }, 400)
