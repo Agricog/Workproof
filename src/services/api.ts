@@ -63,10 +63,12 @@ async function apiRequest<T>(
  */
 function base64ToBlob(base64: string, contentType: string = 'image/jpeg'): Blob {
   // Remove data URL prefix if present
-  let base64Data = base64
+  let base64Data: string
   if (base64.includes(',')) {
     const parts = base64.split(',')
-    base64Data = parts[1] || parts[0]
+    base64Data = parts.length > 1 ? parts[1] : parts[0]
+  } else {
+    base64Data = base64
   }
   
   const byteCharacters = atob(base64Data)
