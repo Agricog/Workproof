@@ -12,6 +12,23 @@ export function initializeSentry(): void {
     environment: import.meta.env.MODE,
     enabled: import.meta.env.PROD,
     tracesSampleRate: import.meta.env.PROD ? 0.1 : 1.0,
+    replaysSessionSampleRate: 0.1,
+    replaysOnErrorSampleRate: 1.0,
+    integrations: [
+      Sentry.replayIntegration({
+        maskAllText: true,
+        blockAllMedia: true,
+      }),
+    ],
+    beforeSend(event) {
+      // Filter out sensitive data
+      if (event.request?.headers) {
+        delete event.request.headers['Authorization']
+        delete event.request.headers['X-CSRF-Token']
+        delete event.request.headers['Cookie']
+      }
+      return event
+    },
   })
 }
 
