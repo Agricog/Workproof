@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { ClerkProvider, SignedIn, SignedOut } from '@clerk/clerk-react'
+import { ClerkProvider, SignedIn, SignedOut, useAuth } from '@clerk/clerk-react'
 import Layout from './components/layout/Layout'
 import { startSyncService, stopSyncService } from './services/sync'
 
@@ -24,6 +24,21 @@ function LoadingSpinner() {
   )
 }
 
+// Sync service initializer - must be inside ClerkProvider
+function SyncServiceInit() {
+  const { getToken } = useAuth()
+
+  useEffect(() => {
+    // Start sync service with token getter
+    startSyncService(getToken)
+    return () => {
+      stopSyncService()
+    }
+  }, [getToken])
+
+  return null
+}
+
 // Protected route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
@@ -37,15 +52,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
 export default function App() {
-  useEffect(() => {
-    // Start sync service when app loads
-    startSyncService()
-
-    return () => {
-      stopSyncService()
-    }
-  }, [])
-
   // If no Clerk key, show app without auth (development mode)
   if (!clerkPubKey) {
     return (
@@ -119,14 +125,15 @@ export default function App() {
 
   return (
     <ClerkProvider publishableKey={clerkPubKey}>
+      <SyncServiceInit />
       <BrowserRouter>
         <Suspense fallback={<LoadingSpinner />}>
           <Routes>
             {/* Public routes */}
             <Route path="/" element={<Landing />} />
             <Route
-  path="/login/*"
-  element={
+              path="/login/*"
+              element={
                 <>
                   <SignedIn>
                     <Navigate to="/dashboard" replace />
