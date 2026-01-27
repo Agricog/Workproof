@@ -36,8 +36,8 @@
 		# HSTS - enforce HTTPS (1 year)
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		
-		# Content Security Policy
-		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com https://js.clerk.dev; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; connect-src 'self' https://api.clerk.dev https://www.google-analytics.com https://*.sentry.io https://*.clerk.accounts.dev wss://*.clerk.accounts.dev; frame-src 'self' https://accounts.clerk.dev; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		# Content Security Policy - Updated for Clerk
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com https://js.clerk.dev https://*.clerk.accounts.dev; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; connect-src 'self' https://api.clerk.dev https://*.clerk.accounts.dev https://www.google-analytics.com https://*.sentry.io wss://*.clerk.accounts.dev; frame-src 'self' https://accounts.clerk.dev https://*.clerk.accounts.dev; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 		
 		# Remove server identification
 		-Server
