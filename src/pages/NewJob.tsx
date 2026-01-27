@@ -1,13 +1,19 @@
+/**
+ * WorkProof New Job Form
+ * Create job with validation and API integration
+ */
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
-import { ArrowLeft, MapPin, User, Calendar, Plus } from 'lucide-react'
+import { useAuth } from '@clerk/clerk-react'
+import { ArrowLeft, MapPin, User, Calendar, Plus, AlertCircle } from 'lucide-react'
 import { validateAddress, validateClientName } from '../utils/validation'
 import { sanitizeInput } from '../utils/sanitization'
 import { TASK_TYPE_CONFIGS } from '../types/taskConfigs'
 import type { TaskType } from '../types/models'
 import { captureError } from '../utils/errorTracking'
 import { trackJobCreated } from '../utils/analytics'
+import { jobsApi, tasksApi } from '../services/api'
 
 interface FormData {
   address: string
@@ -21,10 +27,12 @@ interface FormErrors {
   clientName?: string
   startDate?: string
   tasks?: string
+  submit?: string
 }
 
 export default function NewJob() {
   const navigate = useNavigate()
+  const { getToken } = useAuth()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState<FormData>({
     address: '',
@@ -115,19 +123,48 @@ export default function NewJob() {
     }
 
     setIsSubmitting(true)
+    setErrors((prev) => ({ ...prev, submit: undefined }))
 
     try {
-      // TODO: API call to create job
-      // For now, simulate success
-      await new Promise((resolve) => setTimeout(resolve, 500))
+      const token = await getToken()
+
+      // Create the job
+      const jobResponse = await jobsApi.create({
+        address: formData.address,
+        clientName: formData.clientName,
+        startDate: formData.startDate,
+        status: 'active',
+      }, token)
+
+      if (jobResponse.error || !jobResponse.data) {
+        setErrors({ submit: jobResponse.error || 'Failed to create job' })
+        return
+      }
+
+      const jobId = jobResponse.data.id
+
+      // Create tasks for the job
+      if (formData.selectedTasks.length > 0) {
+        const tasksResponse = await tasksApi.bulkCreate(
+          jobId,
+          formData.selectedTasks,
+          token
+        )
+
+        if (tasksResponse.error) {
+          // Job created but tasks failed - still navigate but log error
+          captureError(new Error(tasksResponse.error), 'NewJob.createTasks')
+        }
+      }
 
       // Track analytics
       trackJobCreated(formData.selectedTasks.length)
 
-      navigate('/jobs')
+      // Navigate to the new job
+      navigate(`/jobs/${jobId}`)
     } catch (error) {
       captureError(error, 'NewJob.handleSubmit')
-      setErrors({ address: 'Failed to create job. Please try again.' })
+      setErrors({ submit: 'Failed to create job. Please try again.' })
     } finally {
       setIsSubmitting(false)
     }
@@ -154,6 +191,14 @@ export default function NewJob() {
           <h1 className="text-xl font-bold text-gray-900">New Job</h1>
         </div>
 
+        {/* Submit Error */}
+        {errors.submit && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+            <p className="text-red-800 text-sm">{errors.submit}</p>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="card">
             <h2 className="font-semibold text-gray-900 mb-4">Job Details</h2>
@@ -164,7 +209,7 @@ export default function NewJob() {
                   Site Address
                 </label>
                 <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" aria-hidden="true" />
                   <input
                     id="address"
                     type="text"
@@ -177,7 +222,7 @@ export default function NewJob() {
                   />
                 </div>
                 {errors.address && (
-                  <p id="address-error" className="text-red-600 text-sm mt-1">
+                  <p id="address-error" className="text-red-600 text-sm mt-1" role="alert">
                     {errors.address}
                   </p>
                 )}
@@ -188,7 +233,7 @@ export default function NewJob() {
                   Client Name
                 </label>
                 <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" aria-hidden="true" />
                   <input
                     id="clientName"
                     type="text"
@@ -201,7 +246,7 @@ export default function NewJob() {
                   />
                 </div>
                 {errors.clientName && (
-                  <p id="client-error" className="text-red-600 text-sm mt-1">
+                  <p id="client-error" className="text-red-600 text-sm mt-1" role="alert">
                     {errors.clientName}
                   </p>
                 )}
@@ -212,7 +257,7 @@ export default function NewJob() {
                   Start Date
                 </label>
                 <div className="relative">
-                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" aria-hidden="true" />
                   <input
                     id="startDate"
                     type="date"
@@ -220,10 +265,13 @@ export default function NewJob() {
                     onChange={(e) => setFormData((prev) => ({ ...prev, startDate: e.target.value }))}
                     className={`input-field pl-10 ${errors.startDate ? 'border-red-500' : ''}`}
                     aria-invalid={!!errors.startDate}
+                    aria-describedby={errors.startDate ? 'date-error' : undefined}
                   />
                 </div>
                 {errors.startDate && (
-                  <p className="text-red-600 text-sm mt-1">{errors.startDate}</p>
+                  <p id="date-error" className="text-red-600 text-sm mt-1" role="alert">
+                    {errors.startDate}
+                  </p>
                 )}
               </div>
             </div>
@@ -236,35 +284,30 @@ export default function NewJob() {
             </p>
 
             {errors.tasks && (
-              <p className="text-red-600 text-sm mb-3">{errors.tasks}</p>
+              <p className="text-red-600 text-sm mb-3" role="alert">{errors.tasks}</p>
             )}
 
-            <div className="space-y-2">
+            <div className="space-y-2" role="group" aria-label="Select task types">
               {taskTypes.map(([type, config]) => (
                 <button
                   key={type}
                   type="button"
                   onClick={() => toggleTask(type)}
-                  className={`
-                    w-full flex items-center justify-between p-3 rounded-lg border
-                    transition-colors text-left
-                    ${
-                      formData.selectedTasks.includes(type)
-                        ? 'border-green-500 bg-green-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }
-                  `}
+                  className={`w-full flex items-center justify-between p-3 rounded-lg border transition-colors text-left ${
+                    formData.selectedTasks.includes(type)
+                      ? 'border-green-500 bg-green-50'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                  aria-pressed={formData.selectedTasks.includes(type)}
                 >
                   <div className="flex items-center gap-3">
                     <div
-                      className={`
-                        w-5 h-5 rounded border-2 flex items-center justify-center
-                        ${
-                          formData.selectedTasks.includes(type)
-                            ? 'border-green-500 bg-green-500'
-                            : 'border-gray-300'
-                        }
-                      `}
+                      className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                        formData.selectedTasks.includes(type)
+                          ? 'border-green-500 bg-green-500'
+                          : 'border-gray-300'
+                      }`}
+                      aria-hidden="true"
                     >
                       {formData.selectedTasks.includes(type) && (
                         <svg
@@ -301,7 +344,7 @@ export default function NewJob() {
               <span>Creating...</span>
             ) : (
               <>
-                <Plus className="w-5 h-5" />
+                <Plus className="w-5 h-5" aria-hidden="true" />
                 <span>Create Job</span>
               </>
             )}
