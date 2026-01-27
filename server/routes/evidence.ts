@@ -224,9 +224,10 @@ evidence.post('/', async (c) => {
       [EVIDENCE_FIELDS.photo_url]: photoUrl,
       [EVIDENCE_FIELDS.photo_hash]: photoHash || '',
       [EVIDENCE_FIELDS.captured_at]: (body.captured_at || body.capturedAt) as string || new Date().toISOString(),
-      [EVIDENCE_FIELDS.synced_at]: new Date().toISOString(),
-      [EVIDENCE_FIELDS.is_synced]: true
+      [EVIDENCE_FIELDS.synced_at]: new Date().toISOString()
     }
+
+    // Note: is_synced is a Checklist field - omit it or use proper format if needed
 
     // Add optional GPS fields
     const latitude = body.latitude as number | undefined
