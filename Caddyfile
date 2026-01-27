@@ -36,8 +36,9 @@
 		# HSTS - enforce HTTPS (1 year)
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		
-		# Content Security Policy - Updated for Clerk
-		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com https://js.clerk.dev https://*.clerk.accounts.dev https://challenges.cloudflare.com https://www.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; connect-src 'self' https://api.clerk.dev https://*.clerk.accounts.dev https://clerk-telemetry.com https://www.google-analytics.com https://*.sentry.io wss://*.clerk.accounts.dev; frame-src 'self' https://accounts.clerk.dev https://*.clerk.accounts.dev https://challenges.cloudflare.com https://www.google.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; worker-src 'self' blob:"
+		# Content Security Policy - Updated for Clerk and R2
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com https://js.clerk.dev https://*.clerk.accounts.dev https://challenges.cloudflare.com https://www.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; connect-src 'self' https://evidence.workproof.co.uk https://*.r2.cloudflarestorage.com https://api.clerk.dev https://*.clerk.accounts.dev https://clerk-telemetry.com https://www.google-analytics.com https://*.sentry.io wss://*.clerk.accounts.dev; frame-src 'self' https://accounts.clerk.dev https://*.clerk.accounts.dev https://challenges.cloudflare.com https://www.google.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; worker-src 'self' blob:"
+
 		# Remove server identification
 		-Server
 	}
