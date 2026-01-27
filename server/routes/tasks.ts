@@ -36,6 +36,30 @@ async function verifyJobOwnership(jobId: string, clerkId: string): Promise<boole
   }
 }
 
+// Helper: Transform SmartSuite task record to readable format
+function transformTask(record: Record<string, unknown>): Record<string, unknown> {
+  // Job field may be array (linked record)
+  const jobValue = record[TASK_FIELDS.job] as string[] | string | undefined
+  const jobId = Array.isArray(jobValue) ? jobValue[0] : jobValue
+
+  return {
+    id: record.id,
+    title: record.title,
+    jobId: jobId || '',
+    taskType: record[TASK_FIELDS.task_type] || 'unknown',
+    status: record[TASK_FIELDS.status] || 'pending',
+    order: record[TASK_FIELDS.order] || 0,
+    notes: record[TASK_FIELDS.notes],
+    startedAt: record[TASK_FIELDS.started_at],
+    completedAt: record[TASK_FIELDS.completed_at],
+    // Default evidence counts (will be updated when evidence is loaded)
+    evidenceCount: 0,
+    requiredEvidenceCount: 5,
+    // Also include raw for debugging
+    _raw: record
+  }
+}
+
 // List tasks - supports both /tasks?job_id=xxx and /tasks/job/:jobId
 tasks.get('/', async (c) => {
   const auth = getAuth(c)
@@ -74,8 +98,13 @@ tasks.get('/', async (c) => {
       sort: [{ field: TASK_FIELDS.order, direction: 'asc' }]
     })
 
+    // Transform each task to readable format
+    const transformedItems = result.items.map(item =>
+      transformTask(item as unknown as Record<string, unknown>)
+    )
+
     return c.json({
-      items: result.items,
+      items: transformedItems,
       total: result.total
     })
   } catch (error) {
@@ -117,8 +146,13 @@ tasks.get('/job/:jobId', async (c) => {
       sort: [{ field: TASK_FIELDS.order, direction: 'asc' }]
     })
 
+    // Transform each task to readable format
+    const transformedItems = result.items.map(item =>
+      transformTask(item as unknown as Record<string, unknown>)
+    )
+
     return c.json({
-      items: result.items,
+      items: transformedItems,
       total: result.total
     })
   } catch (error) {
@@ -146,7 +180,10 @@ tasks.get('/:id', async (c) => {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    return c.json(task)
+    // Transform to readable format
+    const transformed = transformTask(task as unknown as Record<string, unknown>)
+
+    return c.json(transformed)
   } catch (error) {
     console.error('Error fetching task:', error)
     return c.json({ error: 'Failed to fetch task' }, 500)
@@ -201,7 +238,10 @@ tasks.post('/', async (c) => {
 
     const task = await client.createRecord<Task>(TABLES.TASKS, taskData as Omit<Task, 'id'>)
 
-    return c.json(task, 201)
+    // Transform to readable format
+    const transformed = transformTask(task as unknown as Record<string, unknown>)
+
+    return c.json(transformed, 201)
   } catch (error) {
     console.error('Error creating task:', error)
     return c.json({ error: 'Failed to create task' }, 500)
@@ -251,7 +291,12 @@ tasks.post('/bulk', async (c) => {
 
     const createdTasks = await client.bulkCreate<Task>(TABLES.TASKS, tasksData as Array<Omit<Task, 'id'>>)
 
-    return c.json({ items: createdTasks }, 201)
+    // Transform each task to readable format
+    const transformedItems = createdTasks.map(item =>
+      transformTask(item as unknown as Record<string, unknown>)
+    )
+
+    return c.json({ items: transformedItems }, 201)
   } catch (error) {
     console.error('Error bulk creating tasks:', error)
     return c.json({ error: 'Failed to create tasks' }, 500)
@@ -311,7 +356,10 @@ tasks.patch('/:id', async (c) => {
       updateData as Partial<Task>
     )
 
-    return c.json(updatedTask)
+    // Transform to readable format
+    const transformed = transformTask(updatedTask as unknown as Record<string, unknown>)
+
+    return c.json(transformed)
   } catch (error) {
     console.error('Error updating task:', error)
     return c.json({ error: 'Failed to update task' }, 500)
@@ -371,7 +419,10 @@ tasks.put('/:id', async (c) => {
       updateData as Partial<Task>
     )
 
-    return c.json(updatedTask)
+    // Transform to readable format
+    const transformed = transformTask(updatedTask as unknown as Record<string, unknown>)
+
+    return c.json(transformed)
   } catch (error) {
     console.error('Error updating task:', error)
     return c.json({ error: 'Failed to update task' }, 500)
