@@ -10,6 +10,7 @@ import jobs from './routes/jobs.js'
 import tasks from './routes/tasks.js'
 import evidence from './routes/evidence.js'
 import auditPacks from './routes/audit-packs.js'
+import packs from './routes/packs.js'
 import clerkWebhook from './webhooks/clerk.js'
 
 const app = new Hono()
@@ -35,6 +36,7 @@ app.route('/api/jobs', jobs)
 app.route('/api/tasks', tasks)
 app.route('/api/evidence', evidence)
 app.route('/api/audit-packs', auditPacks)
+app.route('/api/packs', packs)
 
 // Webhooks
 app.route('/webhooks', clerkWebhook)
@@ -52,7 +54,6 @@ app.onError((err, c) => {
 
 // Start server
 const port = parseInt(process.env.API_PORT || '3001')
-
 console.log(`🚀 Server running on port ${port}`)
 
 serve({
