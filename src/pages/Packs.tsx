@@ -1,6 +1,7 @@
 /**
  * WorkProof Packs List
  * Shows completed jobs ready for audit pack export
+ * Optimized with parallel data fetching
  */
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
@@ -78,63 +79,56 @@ export default function Packs() {
         jobItems = (jobData as { items: Job[] }).items || []
       }
 
-      // For each job, get tasks and evidence counts
-      const packsWithDetails: PackJob[] = []
-      
-      for (const job of jobItems) {
-        // Get tasks for this job
-        const tasksResponse = await tasksApi.listByJob(job.id, token)
-        let tasks: Task[] = []
-        
-        if (tasksResponse.data) {
-          const taskData = tasksResponse.data as unknown
-          if (Array.isArray(taskData)) {
-            tasks = taskData
-          } else if (taskData && typeof taskData === 'object' && 'items' in taskData) {
-            tasks = (taskData as { items: Task[] }).items || []
-          }
-        }
+      // Fetch all job details in PARALLEL (much faster!)
+      const packsWithDetails = await Promise.all(
+        jobItems.map(async (job): Promise<PackJob> => {
+          // Fetch tasks and evidence counts in parallel for each job
+          const [tasksResponse, countsResponse] = await Promise.all([
+            tasksApi.listByJob(job.id, token),
+            fetch(`${API_BASE}/api/evidence/counts-by-job?job_id=${job.id}`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              credentials: 'include'
+            }).then(res => res.ok ? res.json() : { counts: {} }).catch(() => ({ counts: {} }))
+          ])
 
-        // Get evidence counts
-        let evidenceCounts: Record<string, number> = {}
-        
-        try {
-          const countsResponse = await fetch(`${API_BASE}/api/evidence/counts-by-job?job_id=${job.id}`, {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            },
-            credentials: 'include'
-          })
+          // Parse tasks
+          let tasks: Task[] = []
+          if (tasksResponse.data) {
+            const taskData = tasksResponse.data as unknown
+            if (Array.isArray(taskData)) {
+              tasks = taskData
+            } else if (taskData && typeof taskData === 'object' && 'items' in taskData) {
+              tasks = (taskData as { items: Task[] }).items || []
+            }
+          }
+
+          // Get evidence counts
+          const evidenceCounts: Record<string, number> = countsResponse.counts || {}
+
+          // Calculate totals
+          let totalEvidence = 0
+          let totalRequired = 0
           
-          if (countsResponse.ok) {
-            const countsData = await countsResponse.json()
-            evidenceCounts = countsData.counts || {}
+          tasks.forEach(task => {
+            const config = getTaskTypeConfig(task.taskType)
+            totalEvidence += evidenceCounts[task.id] || 0
+            totalRequired += config.requiredEvidence.length
+          })
+
+          const isComplete = totalRequired > 0 && totalEvidence >= totalRequired
+
+          return {
+            ...job,
+            tasks,
+            totalEvidence,
+            totalRequired,
+            isComplete
           }
-        } catch {
-          // Continue with zero counts
-        }
-
-        // Calculate totals
-        let totalEvidence = 0
-        let totalRequired = 0
-        
-        tasks.forEach(task => {
-          const config = getTaskTypeConfig(task.taskType)
-          totalEvidence += evidenceCounts[task.id] || 0
-          totalRequired += config.requiredEvidence.length
         })
-
-        const isComplete = totalRequired > 0 && totalEvidence >= totalRequired
-
-        packsWithDetails.push({
-          ...job,
-          tasks,
-          totalEvidence,
-          totalRequired,
-          isComplete
-        })
-      }
+      )
 
       setPacks(packsWithDetails)
     } catch (err) {
