@@ -11,13 +11,15 @@ const packs = new Hono()
 packs.use('*', rateLimitMiddleware)
 packs.use('*', authMiddleware)
 
-// Helper: Get user record ID
+// Helper: Get user record ID by fetching all and filtering in memory
 async function getUserRecordId(clerkId: string): Promise<string | null> {
   const client = getSmartSuiteClient()
-  const result = await client.listRecords(TABLES.USERS, {
-    filter: { field: 'sca232a6e1', comparison: 'is', value: clerkId }
+  // Fetch users and filter in memory to avoid SmartSuite filter format issues
+  const result = await client.listRecords(TABLES.USERS, { limit: 100 })
+  const user = result.items.find((u: Record<string, unknown>) => {
+    return u['sca232a6e1'] === clerkId
   })
-  return result.items[0]?.id || null
+  return user?.id || null
 }
 
 // Helper: Verify job ownership
@@ -25,7 +27,10 @@ async function verifyJobOwnership(jobId: string, clerkId: string): Promise<boole
   const client = getSmartSuiteClient()
   const userRecordId = await getUserRecordId(clerkId)
   
-  if (!userRecordId) return false
+  if (!userRecordId) {
+    console.log('[PACKS] User not found for clerk ID:', clerkId)
+    return false
+  }
 
   try {
     const job = await client.getRecord(TABLES.JOBS, jobId) as unknown as Record<string, unknown>
@@ -58,7 +63,7 @@ function extractTaskIds(taskValue: unknown): string[] {
   return []
 }
 
-// Generate PDF audit pack - temporarily return JSON to test
+// Generate PDF audit pack - test version returns JSON
 packs.get('/:jobId/pdf', async (c) => {
   console.log('[PACKS] PDF endpoint hit')
   
@@ -70,6 +75,7 @@ packs.get('/:jobId/pdf', async (c) => {
 
   try {
     // Verify ownership
+    console.log('[PACKS] Verifying ownership...')
     const isOwner = await verifyJobOwnership(jobId, auth.userId)
     if (!isOwner) {
       console.log('[PACKS] Ownership failed')
@@ -83,7 +89,7 @@ packs.get('/:jobId/pdf', async (c) => {
       message: 'PDF endpoint working',
       jobId,
       userId: auth.userId,
-      note: 'PDFKit not yet configured'
+      note: 'PDFKit will be added once route is confirmed working'
     })
 
   } catch (error) {
