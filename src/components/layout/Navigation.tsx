@@ -10,7 +10,7 @@ import SyncStatus from '../common/SyncStatus'
 const navItems = [
   { to: '/dashboard', icon: Home, label: 'Home' },
   { to: '/jobs', icon: Briefcase, label: 'Jobs' },
-  { to: '/audit-packs', icon: FileText, label: 'Packs' },
+  { to: '/packs', icon: FileText, label: 'Packs' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 
