@@ -81,16 +81,33 @@ async function verifyTaskOwnership(taskId: string, clerkId: string): Promise<boo
   }
 }
 
+// Helper: Extract evidence type from title (fallback when field is empty)
+function extractEvidenceTypeFromTitle(title: unknown): string | null {
+  if (typeof title !== 'string') return null
+  // Title format: "evidence_type - timestamp"
+  const dashIndex = title.indexOf(' - ')
+  if (dashIndex > 0) {
+    return title.substring(0, dashIndex)
+  }
+  return null
+}
+
 // Helper: Transform SmartSuite evidence record to readable format
 function transformEvidence(record: Record<string, unknown>): Record<string, unknown> {
   // Task field may be array (linked record)
   const taskIds = extractTaskIds(record[EVIDENCE_FIELDS.task])
   const taskId = taskIds[0] || ''
 
+  // Get evidence type - try field first, then extract from title as fallback
+  let evidenceType = record[EVIDENCE_FIELDS.evidence_type] as string | undefined
+  if (!evidenceType || evidenceType === 'unknown') {
+    evidenceType = extractEvidenceTypeFromTitle(record.title) || 'unknown'
+  }
+
   return {
     id: record.id,
     taskId: taskId,
-    evidenceType: record[EVIDENCE_FIELDS.evidence_type] || 'unknown',
+    evidenceType: evidenceType,
     photoUrl: record[EVIDENCE_FIELDS.photo_url] || '',
     photoHash: record[EVIDENCE_FIELDS.photo_hash] || '',
     latitude: record[EVIDENCE_FIELDS.latitude],
@@ -346,3 +363,4 @@ evidence.delete('/:id', async (c) => {
 })
 
 export default evidence
+
