@@ -22,7 +22,7 @@ import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 import { trackPageView, trackEvent, trackError } from '../utils/analytics'
 import { jobsApi, tasksApi, evidenceApi } from '../services/api'
 import { captureError } from '../utils/errorTracking'
-import { getTaskConfig } from '../types/taskConfigs'
+import { getTaskTypeConfig } from '../types/taskConfigs'
 import type { Job, Task, TaskType } from '../types/models'
 
 // Extended evidence interface with all fields we need
@@ -262,16 +262,16 @@ export default function PackPreview() {
       
       // Stats boxes
       const statsY = summaryY - 40
-      const boxWidth = 150
-      const boxHeight = 60
+      const statBoxWidth = 150
+      const statBoxHeight = 60
       const gap = 20
       
       // Tasks box
       page.drawRectangle({
         x: 50,
-        y: statsY - boxHeight,
-        width: boxWidth,
-        height: boxHeight,
+        y: statsY - statBoxHeight,
+        width: statBoxWidth,
+        height: statBoxHeight,
         borderColor: rgb(0.85, 0.85, 0.85),
         borderWidth: 1
       })
@@ -292,22 +292,22 @@ export default function PackPreview() {
       
       // Evidence box
       page.drawRectangle({
-        x: 50 + boxWidth + gap,
-        y: statsY - boxHeight,
-        width: boxWidth,
-        height: boxHeight,
+        x: 50 + statBoxWidth + gap,
+        y: statsY - statBoxHeight,
+        width: statBoxWidth,
+        height: statBoxHeight,
         borderColor: rgb(0.85, 0.85, 0.85),
         borderWidth: 1
       })
       page.drawText('Evidence Items', {
-        x: 60 + boxWidth + gap,
+        x: 60 + statBoxWidth + gap,
         y: statsY - 20,
         size: 10,
         font: font,
         color: rgb(0.5, 0.5, 0.5)
       })
       page.drawText(`${evidence.length}`, {
-        x: 60 + boxWidth + gap,
+        x: 60 + statBoxWidth + gap,
         y: statsY - 45,
         size: 24,
         font: fontBold,
@@ -316,22 +316,22 @@ export default function PackPreview() {
       
       // Compliance box
       page.drawRectangle({
-        x: 50 + (boxWidth + gap) * 2,
-        y: statsY - boxHeight,
-        width: boxWidth,
-        height: boxHeight,
+        x: 50 + (statBoxWidth + gap) * 2,
+        y: statsY - statBoxHeight,
+        width: statBoxWidth,
+        height: statBoxHeight,
         borderColor: rgb(0.85, 0.85, 0.85),
         borderWidth: 1
       })
       page.drawText('Compliance', {
-        x: 60 + (boxWidth + gap) * 2,
+        x: 60 + (statBoxWidth + gap) * 2,
         y: statsY - 20,
         size: 10,
         font: font,
         color: rgb(0.5, 0.5, 0.5)
       })
       page.drawText('100%', {
-        x: 60 + (boxWidth + gap) * 2,
+        x: 60 + (statBoxWidth + gap) * 2,
         y: statsY - 45,
         size: 24,
         font: fontBold,
@@ -339,7 +339,7 @@ export default function PackPreview() {
       })
       
       // Verification section
-      const verifyY = statsY - boxHeight - 50
+      const verifyY = statsY - statBoxHeight - 50
       page.drawText('Verification Status', {
         x: 50,
         y: verifyY,
@@ -497,7 +497,7 @@ export default function PackPreview() {
 
   // Calculate totals
   const totalRequired = tasks.reduce((sum, task) => {
-    const config = getTaskConfig(task.taskType as TaskType)
+    const config = getTaskTypeConfig(task.taskType as TaskType)
     return sum + (config?.requiredEvidence.length || 0)
   }, 0)
   
@@ -601,7 +601,7 @@ export default function PackPreview() {
 
         {/* Tasks with Evidence */}
         {tasks.map(task => {
-          const config = getTaskConfig(task.taskType as TaskType)
+          const config = getTaskTypeConfig(task.taskType as TaskType)
           const taskEvidence = evidence.filter(e => e.taskId === task.id)
           
           return (
@@ -609,13 +609,13 @@ export default function PackPreview() {
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <h3 className="font-medium text-gray-900">
-                    {config?.name || task.taskType}
+                    {config?.label || task.taskType}
                   </h3>
                   <p className="text-sm text-gray-500">
                     {taskEvidence.length}/{config?.requiredEvidence.length || 0} photos
                   </p>
                 </div>
-                {config?.partP && (
+                {config?.partPNotifiable && (
                   <span className="badge badge-blue">Part P</span>
                 )}
               </div>
