@@ -206,6 +206,11 @@ export default function TaskDetail() {
   const taskStatus = (task.status || 'pending') as TaskStatus
   const statusConfig = TASK_STATUS_CONFIG[taskStatus] || TASK_STATUS_CONFIG.pending
 
+  // Calculate progress from actual data
+  const capturedCount = Object.keys(capturedEvidence).length
+  const requiredCount = config.requiredEvidence.length
+  const progressPercent = requiredCount > 0 ? (capturedCount / requiredCount) * 100 : 0
+
   if (showCamera && selectedEvidenceType) {
     return (
       <PhotoCapture
@@ -274,26 +279,27 @@ export default function TaskDetail() {
             <div
               className="flex-1 bg-gray-200 rounded-full h-3"
               role="progressbar"
-              aria-valuenow={task.requiredEvidenceCount ? ((task.evidenceCount || 0) / task.requiredEvidenceCount) * 100 : 0}
+              aria-valuenow={Math.round(progressPercent)}
               aria-valuemin={0}
               aria-valuemax={100}
               aria-label="Evidence collection progress"
             >
               <div
-                className="bg-green-600 h-3 rounded-full transition-all"
-                style={{
-                  width: `${
-                    task.requiredEvidenceCount
-                      ? ((task.evidenceCount || 0) / task.requiredEvidenceCount) * 100
-                      : 0
-                  }%`,
-                }}
+                className={`h-3 rounded-full transition-all ${
+                  progressPercent >= 100 ? 'bg-green-600' : 'bg-amber-500'
+                }`}
+                style={{ width: `${Math.min(progressPercent, 100)}%` }}
               ></div>
             </div>
             <span className="text-sm font-medium text-gray-700">
-              {task.evidenceCount || 0}/{task.requiredEvidenceCount || 0}
+              {capturedCount}/{requiredCount}
             </span>
           </div>
+          {progressPercent >= 100 && (
+            <p className="text-green-600 text-sm mt-2 font-medium">
+              ✓ All required evidence captured
+            </p>
+          )}
         </div>
 
         {/* Evidence Checklist */}
