@@ -9,7 +9,6 @@ import { useAuth } from '@clerk/clerk-react'
 import {
   CheckCircle,
   Clock,
-  Download,
   Eye,
   MapPin,
   Calendar,
@@ -43,7 +42,6 @@ export default function Packs() {
   const [filter, setFilter] = useState<PackFilter>('all')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
   useEffect(() => {
     trackPageView('/packs', 'Packs')
@@ -169,44 +167,6 @@ export default function Packs() {
     setFilteredPacks(filtered)
   }
 
-  const handleDownloadPack = async (e: React.MouseEvent, jobId: string) => {
-    e.preventDefault()
-    e.stopPropagation()
-
-    setDownloadingId(jobId)
-
-    try {
-      const token = await getToken()
-      
-      const response = await fetch(`${API_BASE}/api/packs/${jobId}/pdf`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        credentials: 'include'
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to generate PDF')
-      }
-
-      // Get the blob and create download link
-      const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `audit-pack-${jobId}.pdf`
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
-      document.body.removeChild(a)
-    } catch (err) {
-      captureError(err, 'Packs.handleDownloadPack')
-      setError('Failed to download pack. Please try again.')
-    } finally {
-      setDownloadingId(null)
-    }
-  }
-
   const readyCount = packs.filter(p => p.isComplete).length
   const incompleteCount = packs.filter(p => !p.isComplete).length
 
@@ -323,7 +283,6 @@ export default function Packs() {
               const progressPercent = pack.totalRequired > 0 
                 ? Math.round((pack.totalEvidence / pack.totalRequired) * 100)
                 : 0
-              const isDownloading = downloadingId === pack.id
 
               return (
                 <div
@@ -407,36 +366,19 @@ export default function Packs() {
                     </div>
                   )}
 
-                  {/* Actions */}
-                  <div className="flex items-center gap-2 pt-3 border-t border-gray-100">
+                  {/* Action - Preview Only */}
+                  <div className="pt-3 border-t border-gray-100">
                     <Link
                       to={`/packs/${pack.id}`}
-                      className="flex-1 btn-secondary flex items-center justify-center gap-2 text-sm"
-                    >
-                      <Eye className="w-4 h-4" />
-                      Preview
-                    </Link>
-                    <button
-                      onClick={(e) => handleDownloadPack(e, pack.id)}
-                      disabled={!pack.isComplete || isDownloading}
-                      className={`flex-1 flex items-center justify-center gap-2 text-sm px-4 py-2 rounded-lg transition-colors ${
+                      className={`w-full flex items-center justify-center gap-2 text-sm px-4 py-3 rounded-lg transition-colors ${
                         pack.isComplete
                           ? 'bg-green-600 text-white hover:bg-green-700'
-                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'btn-secondary'
                       }`}
                     >
-                      {isDownloading ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 animate-spin" />
-                          Generating...
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-4 h-4" />
-                          Download PDF
-                        </>
-                      )}
-                    </button>
+                      <Eye className="w-4 h-4" />
+                      {pack.isComplete ? 'Preview & Download' : 'Preview Progress'}
+                    </Link>
                   </div>
                 </div>
               )
