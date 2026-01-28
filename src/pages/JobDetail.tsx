@@ -22,8 +22,10 @@ import {
 import { getTaskTypeConfig } from '../types/taskConfigs'
 import { trackPageView, trackError } from '../utils/analytics'
 import { captureError } from '../utils/errorTracking'
-import { jobsApi, tasksApi, evidenceApi } from '../services/api'
+import { jobsApi, tasksApi } from '../services/api'
 import type { Job, Task, TaskStatus } from '../types/models'
+
+const API_BASE = import.meta.env.VITE_API_URL || ''
 
 const TASK_STATUS_CONFIG: Record<TaskStatus, { label: string; color: string }> = {
   pending: { label: 'Not Started', color: 'gray' },
@@ -91,53 +93,38 @@ export default function JobDetail() {
           taskItems = (taskData as { items: Task[] }).items || []
         }
         
-        // Initialize tasks with required counts from config (no API call needed)
+        // Fetch evidence counts in ONE API call
+        let evidenceCounts: Record<string, number> = {}
+        
+        try {
+          const countsResponse = await fetch(`${API_BASE}/api/evidence/counts-by-job?job_id=${jobId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            credentials: 'include'
+          })
+          
+          if (countsResponse.ok) {
+            const countsData = await countsResponse.json()
+            evidenceCounts = countsData.counts || {}
+          }
+        } catch (err) {
+          console.error('Failed to fetch evidence counts:', err)
+          // Continue with zero counts if endpoint fails
+        }
+        
+        // Calculate counts for each task
         const tasksWithCounts: TaskWithCounts[] = taskItems.map((task) => {
           const config = getTaskTypeConfig(task.taskType)
           return {
             ...task,
-            calculatedEvidenceCount: 0, // Will be updated below
+            calculatedEvidenceCount: evidenceCounts[task.id] || 0,
             calculatedRequiredCount: config.requiredEvidence.length,
           }
         })
         
-        // Set tasks immediately so UI shows (with 0 counts)
         setTasks(tasksWithCounts)
-        
-        // Fetch evidence counts SEQUENTIALLY with delay to avoid rate limits
-        const evidenceCounts: Record<string, number> = {}
-        
-        for (let i = 0; i < taskItems.length; i++) {
-          const task = taskItems[i]
-          
-          // Add delay between requests (except first one)
-          if (i > 0) {
-            await new Promise(resolve => setTimeout(resolve, 500))
-          }
-          
-          try {
-            const evidenceResponse = await evidenceApi.listByTask(task.id, token)
-            if (evidenceResponse.data) {
-              const evidenceData = evidenceResponse.data as unknown
-              if (Array.isArray(evidenceData)) {
-                evidenceCounts[task.id] = evidenceData.length
-              } else if (evidenceData && typeof evidenceData === 'object' && 'items' in evidenceData) {
-                evidenceCounts[task.id] = (evidenceData as { items: unknown[] }).items?.length || 0
-              } else if (evidenceData && typeof evidenceData === 'object' && 'total' in evidenceData) {
-                evidenceCounts[task.id] = (evidenceData as { total: number }).total || 0
-              }
-            }
-          } catch {
-            evidenceCounts[task.id] = 0
-          }
-          
-          // Update UI progressively as each count comes in
-          setTasks(prev => prev.map(t => 
-            t.id === task.id 
-              ? { ...t, calculatedEvidenceCount: evidenceCounts[task.id] || 0 }
-              : t
-          ))
-        }
       }
     } catch (err) {
       const errorMessage = 'Failed to load job details. Please try again.'
