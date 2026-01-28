@@ -7,7 +7,6 @@ import { Link } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
 import { useAuth } from '@clerk/clerk-react'
 import {
-  FileText,
   CheckCircle,
   Clock,
   Download,
