@@ -1,6 +1,6 @@
 /**
  * WorkProof Pack Preview
- * View evidence before export with client-side PDF generation
+ * View evidence before export with client-side PDF generation including photos
  */
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -50,6 +50,7 @@ export default function PackPreview() {
   const [evidence, setEvidence] = useState<EvidenceItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isGenerating, setIsGenerating] = useState(false)
+  const [generatingStatus, setGeneratingStatus] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [selectedImage, setSelectedImage] = useState<EvidenceItem | null>(null)
 
@@ -146,10 +147,23 @@ export default function PackPreview() {
     })
   }
 
+  // Fetch image and return as bytes
+  const fetchImageBytes = async (url: string): Promise<Uint8Array | null> => {
+    try {
+      const response = await fetch(url)
+      if (!response.ok) return null
+      const arrayBuffer = await response.arrayBuffer()
+      return new Uint8Array(arrayBuffer)
+    } catch {
+      return null
+    }
+  }
+
   const generatePDF = async () => {
     if (!job) return
     
     setIsGenerating(true)
+    setGeneratingStatus('Creating document...')
     
     try {
       // Create PDF document
@@ -167,7 +181,7 @@ export default function PackPreview() {
         y: height - 60,
         size: 28,
         font: fontBold,
-        color: rgb(0.133, 0.545, 0.133) // Green
+        color: rgb(0.133, 0.545, 0.133)
       })
       
       page.drawText('Electrical Compliance Audit Pack', {
@@ -232,7 +246,7 @@ export default function PackPreview() {
         color: rgb(0.2, 0.2, 0.2)
       })
       
-      // Date (right side)
+      // Date
       page.drawText('Completion Date:', {
         x: 380,
         y: boxY - 25,
@@ -412,12 +426,10 @@ export default function PackPreview() {
       // Evidence rows
       evidence.forEach((item, index) => {
         if (yPos < 100) {
-          // New page
           page = pdfDoc.addPage([595, 842])
           yPos = height - 60
         }
         
-        // Alternate row background
         if (index % 2 === 0) {
           page.drawRectangle({
             x: 40,
@@ -444,7 +456,7 @@ export default function PackPreview() {
         yPos -= 22
       })
       
-      // Footer
+      // Footer on evidence log page
       yPos -= 40
       page.drawLine({
         start: { x: 50, y: yPos },
@@ -461,15 +473,195 @@ export default function PackPreview() {
         color: rgb(0.5, 0.5, 0.5)
       })
       
-      page.drawText('This document provides tamper-proof evidence for NICEIC compliance assessments.', {
-        x: 50,
-        y: yPos - 35,
-        size: 9,
-        font: font,
-        color: rgb(0.5, 0.5, 0.5)
-      })
+      // Photo pages - one photo per page
+      setGeneratingStatus(`Embedding photos (0/${evidence.length})...`)
+      
+      for (let i = 0; i < evidence.length; i++) {
+        const item = evidence[i]
+        setGeneratingStatus(`Embedding photos (${i + 1}/${evidence.length})...`)
+        
+        if (!item.photoUrl) continue
+        
+        try {
+          const imageBytes = await fetchImageBytes(item.photoUrl)
+          if (!imageBytes) continue
+          
+          // Determine image type and embed
+          let embeddedImage
+          const isJpg = item.photoUrl.toLowerCase().includes('.jpg') || 
+                        item.photoUrl.toLowerCase().includes('.jpeg')
+          
+          try {
+            if (isJpg) {
+              embeddedImage = await pdfDoc.embedJpg(imageBytes)
+            } else {
+              embeddedImage = await pdfDoc.embedPng(imageBytes)
+            }
+          } catch {
+            // Try the other format if first fails
+            try {
+              embeddedImage = isJpg 
+                ? await pdfDoc.embedPng(imageBytes)
+                : await pdfDoc.embedJpg(imageBytes)
+            } catch {
+              continue // Skip this image
+            }
+          }
+          
+          // Create new page for this photo
+          page = pdfDoc.addPage([595, 842])
+          
+          // Header
+          page.drawText(`Evidence ${i + 1} of ${evidence.length}`, {
+            x: 50,
+            y: height - 40,
+            size: 12,
+            font: fontBold,
+            color: rgb(0.133, 0.545, 0.133)
+          })
+          
+          const evidenceType = (item.evidenceType || 'unknown').replace(/_/g, ' ')
+          page.drawText(evidenceType.charAt(0).toUpperCase() + evidenceType.slice(1), {
+            x: 50,
+            y: height - 60,
+            size: 16,
+            font: fontBold,
+            color: rgb(0.1, 0.1, 0.1)
+          })
+          
+          // Calculate image dimensions to fit on page
+          const maxWidth = width - 100
+          const maxHeight = 500
+          const imgWidth = embeddedImage.width
+          const imgHeight = embeddedImage.height
+          
+          let displayWidth = imgWidth
+          let displayHeight = imgHeight
+          
+          // Scale down if needed
+          if (displayWidth > maxWidth) {
+            const scale = maxWidth / displayWidth
+            displayWidth = maxWidth
+            displayHeight = imgHeight * scale
+          }
+          if (displayHeight > maxHeight) {
+            const scale = maxHeight / displayHeight
+            displayHeight = maxHeight
+            displayWidth = displayWidth * scale
+          }
+          
+          // Center the image
+          const imgX = (width - displayWidth) / 2
+          const imgY = height - 90 - displayHeight
+          
+          // Draw image with border
+          page.drawRectangle({
+            x: imgX - 2,
+            y: imgY - 2,
+            width: displayWidth + 4,
+            height: displayHeight + 4,
+            borderColor: rgb(0.8, 0.8, 0.8),
+            borderWidth: 1
+          })
+          
+          page.drawImage(embeddedImage, {
+            x: imgX,
+            y: imgY,
+            width: displayWidth,
+            height: displayHeight
+          })
+          
+          // Metadata below image
+          const metaY = imgY - 30
+          
+          // Captured timestamp
+          page.drawText('Captured:', {
+            x: 50,
+            y: metaY,
+            size: 9,
+            font: font,
+            color: rgb(0.5, 0.5, 0.5)
+          })
+          page.drawText(formatDate(item.capturedAt), {
+            x: 110,
+            y: metaY,
+            size: 9,
+            font: font,
+            color: rgb(0.2, 0.2, 0.2)
+          })
+          
+          // GPS
+          if (item.latitude && item.longitude) {
+            page.drawText('GPS:', {
+              x: 50,
+              y: metaY - 18,
+              size: 9,
+              font: font,
+              color: rgb(0.5, 0.5, 0.5)
+            })
+            page.drawText(`${parseFloat(item.latitude).toFixed(6)}, ${parseFloat(item.longitude).toFixed(6)}`, {
+              x: 110,
+              y: metaY - 18,
+              size: 9,
+              font: font,
+              color: rgb(0.2, 0.2, 0.2)
+            })
+            
+            if (item.gpsAccuracy) {
+              page.drawText(`(accuracy: ${item.gpsAccuracy}m)`, {
+                x: 280,
+                y: metaY - 18,
+                size: 8,
+                font: font,
+                color: rgb(0.5, 0.5, 0.5)
+              })
+            }
+          }
+          
+          // SHA-256 Hash
+          if (item.photoHash) {
+            page.drawText('SHA-256:', {
+              x: 50,
+              y: metaY - 36,
+              size: 9,
+              font: font,
+              color: rgb(0.5, 0.5, 0.5)
+            })
+            page.drawText(item.photoHash, {
+              x: 110,
+              y: metaY - 36,
+              size: 7,
+              font: font,
+              color: rgb(0.4, 0.4, 0.4)
+            })
+          }
+          
+          // Verification badge
+          page.drawRectangle({
+            x: width - 150,
+            y: metaY - 10,
+            width: 100,
+            height: 25,
+            color: rgb(0.9, 0.97, 0.9),
+            borderColor: rgb(0.133, 0.545, 0.133),
+            borderWidth: 1
+          })
+          page.drawText('VERIFIED', {
+            x: width - 130,
+            y: metaY - 1,
+            size: 10,
+            font: fontBold,
+            color: rgb(0.133, 0.545, 0.133)
+          })
+          
+        } catch (err) {
+          console.error('Failed to embed image:', err)
+          // Continue with other images
+        }
+      }
       
       // Save and download
+      setGeneratingStatus('Finalizing PDF...')
       const pdfBytes = await pdfDoc.save()
       const blob = new Blob([pdfBytes as BlobPart], { type: 'application/pdf' })
       const url = URL.createObjectURL(blob)
@@ -488,6 +680,7 @@ export default function PackPreview() {
       setError('Failed to generate PDF. Please try again.')
     } finally {
       setIsGenerating(false)
+      setGeneratingStatus('')
     }
   }
 
@@ -667,7 +860,7 @@ export default function PackPreview() {
             {isGenerating ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
-                Generating PDF...
+                {generatingStatus || 'Generating PDF...'}
               </>
             ) : (
               <>
