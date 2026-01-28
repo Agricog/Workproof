@@ -81,6 +81,25 @@ async function verifyTaskOwnership(taskId: string, clerkId: string): Promise<boo
   }
 }
 
+// Helper: Verify user owns the job
+async function verifyJobOwnership(jobId: string, clerkId: string): Promise<boolean> {
+  const client = getSmartSuiteClient()
+  const userRecordId = await getUserRecordId(clerkId)
+  
+  if (!userRecordId) return false
+
+  try {
+    const job = await client.getRecord(TABLES.JOBS, jobId) as unknown as Record<string, unknown>
+    const jobUserIds = job['s11e8c3905'] as string[] | string | undefined
+    if (!jobUserIds) return false
+    
+    const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
+    return userIds.includes(userRecordId)
+  } catch {
+    return false
+  }
+}
+
 // Helper: Extract evidence type from title (fallback when field is empty)
 function extractEvidenceTypeFromTitle(title: unknown): string | null {
   if (typeof title !== 'string') return null
@@ -119,6 +138,61 @@ function transformEvidence(record: Record<string, unknown>): Record<string, unkn
   }
 }
 
+// Get evidence counts by job - single API call for all tasks
+// This endpoint avoids rate limiting by fetching once and counting in memory
+evidence.get('/counts-by-job', async (c) => {
+  const auth = getAuth(c)
+  const jobId = c.req.query('job_id')
+  const client = getSmartSuiteClient()
+
+  if (!jobId) {
+    return c.json({ error: 'Missing job_id parameter' }, 400)
+  }
+
+  try {
+    // Verify job ownership
+    const isOwner = await verifyJobOwnership(jobId, auth.userId)
+    if (!isOwner) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
+
+    // Get all tasks for this job first
+    const tasksResult = await client.listRecords<Task>(TABLES.TASKS, { limit: 100 })
+    const jobTasks = tasksResult.items.filter(task => {
+      const taskRecord = task as unknown as Record<string, unknown>
+      const taskJobIds = taskRecord[TASK_FIELDS.job] as string[] | string | undefined
+      if (!taskJobIds) return false
+      const jobIds = Array.isArray(taskJobIds) ? taskJobIds : [taskJobIds]
+      return jobIds.includes(jobId)
+    })
+
+    const taskIds = jobTasks.map(t => t.id)
+
+    // Fetch all evidence in one call
+    const evidenceResult = await client.listRecords<Evidence>(TABLES.EVIDENCE, { limit: 500 })
+
+    // Count evidence per task
+    const counts: Record<string, number> = {}
+    taskIds.forEach(id => { counts[id] = 0 })
+
+    evidenceResult.items.forEach(item => {
+      const record = item as unknown as Record<string, unknown>
+      const evidenceTaskIds = extractTaskIds(record[EVIDENCE_FIELDS.task])
+      
+      evidenceTaskIds.forEach(taskId => {
+        if (taskIds.includes(taskId)) {
+          counts[taskId] = (counts[taskId] || 0) + 1
+        }
+      })
+    })
+
+    return c.json({ counts })
+  } catch (error) {
+    console.error('Error getting evidence counts:', error)
+    return c.json({ error: 'Failed to get evidence counts' }, 500)
+  }
+})
+
 // List evidence for a task
 evidence.get('/', async (c) => {
   const auth = getAuth(c)
@@ -141,29 +215,11 @@ evidence.get('/', async (c) => {
       limit: 200
     })
 
-    // Debug logging - check Railway logs
-    console.log('[Evidence API] Searching for taskId:', taskId)
-    console.log('[Evidence API] Total evidence records fetched:', result.items.length)
-    
-    if (result.items.length > 0) {
-      const sampleItem = result.items[0] as unknown as Record<string, unknown>
-      const sampleTaskField = sampleItem[EVIDENCE_FIELDS.task]
-      console.log('[Evidence API] Sample task field value:', JSON.stringify(sampleTaskField))
-      console.log('[Evidence API] Sample task field type:', typeof sampleTaskField)
-      console.log('[Evidence API] Extracted task IDs from sample:', extractTaskIds(sampleTaskField))
-    }
-
     // Filter by task ID in memory
     const filteredItems = result.items.filter(item => {
       const record = item as unknown as Record<string, unknown>
-      const matches = evidenceBelongsToTask(record, taskId)
-      if (matches) {
-        console.log('[Evidence API] Found matching evidence:', record.id)
-      }
-      return matches
+      return evidenceBelongsToTask(record, taskId)
     })
-
-    console.log('[Evidence API] Filtered items count:', filteredItems.length)
 
     // Transform each evidence to readable format
     const transformedItems = filteredItems.map(item =>
