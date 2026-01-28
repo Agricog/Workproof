@@ -19,11 +19,38 @@ async function getUserRecordId(clerkId: string): Promise<string | null> {
   return user?.id || null
 }
 
+// Helper: Extract task ID from various SmartSuite linked record formats
+function extractTaskIds(taskValue: unknown): string[] {
+  if (!taskValue) return []
+  
+  // Handle array format
+  if (Array.isArray(taskValue)) {
+    return taskValue.flatMap(item => {
+      if (typeof item === 'string') return [item]
+      if (typeof item === 'object' && item !== null && 'id' in item) {
+        return [(item as { id: string }).id]
+      }
+      return []
+    })
+  }
+  
+  // Handle string format
+  if (typeof taskValue === 'string') {
+    return [taskValue]
+  }
+  
+  // Handle object format { id: "xxx" }
+  if (typeof taskValue === 'object' && taskValue !== null && 'id' in taskValue) {
+    return [(taskValue as { id: string }).id]
+  }
+  
+  return []
+}
+
 // Helper: Check if evidence belongs to task
 function evidenceBelongsToTask(evidence: Record<string, unknown>, taskId: string): boolean {
-  const evidenceTaskIds = evidence[EVIDENCE_FIELDS.task] as string[] | string | undefined
-  if (!evidenceTaskIds) return false
-  const taskIds = Array.isArray(evidenceTaskIds) ? evidenceTaskIds : [evidenceTaskIds]
+  const taskValue = evidence[EVIDENCE_FIELDS.task]
+  const taskIds = extractTaskIds(taskValue)
   return taskIds.includes(taskId)
 }
 
@@ -57,12 +84,12 @@ async function verifyTaskOwnership(taskId: string, clerkId: string): Promise<boo
 // Helper: Transform SmartSuite evidence record to readable format
 function transformEvidence(record: Record<string, unknown>): Record<string, unknown> {
   // Task field may be array (linked record)
-  const taskValue = record[EVIDENCE_FIELDS.task] as string[] | string | undefined
-  const taskId = Array.isArray(taskValue) ? taskValue[0] : taskValue
+  const taskIds = extractTaskIds(record[EVIDENCE_FIELDS.task])
+  const taskId = taskIds[0] || ''
 
   return {
     id: record.id,
-    taskId: taskId || '',
+    taskId: taskId,
     evidenceType: record[EVIDENCE_FIELDS.evidence_type] || 'unknown',
     photoUrl: record[EVIDENCE_FIELDS.photo_url] || '',
     photoHash: record[EVIDENCE_FIELDS.photo_hash] || '',
@@ -97,10 +124,29 @@ evidence.get('/', async (c) => {
       limit: 200
     })
 
+    // Debug logging - check Railway logs
+    console.log('[Evidence API] Searching for taskId:', taskId)
+    console.log('[Evidence API] Total evidence records fetched:', result.items.length)
+    
+    if (result.items.length > 0) {
+      const sampleItem = result.items[0] as unknown as Record<string, unknown>
+      const sampleTaskField = sampleItem[EVIDENCE_FIELDS.task]
+      console.log('[Evidence API] Sample task field value:', JSON.stringify(sampleTaskField))
+      console.log('[Evidence API] Sample task field type:', typeof sampleTaskField)
+      console.log('[Evidence API] Extracted task IDs from sample:', extractTaskIds(sampleTaskField))
+    }
+
     // Filter by task ID in memory
-    const filteredItems = result.items.filter(item =>
-      evidenceBelongsToTask(item as unknown as Record<string, unknown>, taskId)
-    )
+    const filteredItems = result.items.filter(item => {
+      const record = item as unknown as Record<string, unknown>
+      const matches = evidenceBelongsToTask(record, taskId)
+      if (matches) {
+        console.log('[Evidence API] Found matching evidence:', record.id)
+      }
+      return matches
+    })
+
+    console.log('[Evidence API] Filtered items count:', filteredItems.length)
 
     // Transform each evidence to readable format
     const transformedItems = filteredItems.map(item =>
@@ -127,8 +173,8 @@ evidence.get('/:id', async (c) => {
     const evidenceRecord = await client.getRecord<Evidence>(TABLES.EVIDENCE, evidenceId)
 
     // Get task ID from evidence
-    const evidenceTaskIds = evidenceRecord[EVIDENCE_FIELDS.task as keyof Evidence] as string[] | string
-    const taskId = Array.isArray(evidenceTaskIds) ? evidenceTaskIds[0] : evidenceTaskIds
+    const taskIds = extractTaskIds(evidenceRecord[EVIDENCE_FIELDS.task as keyof Evidence])
+    const taskId = taskIds[0]
 
     // Verify ownership through task
     const isOwner = await verifyTaskOwnership(taskId, auth.userId)
@@ -267,8 +313,8 @@ evidence.delete('/:id', async (c) => {
     const existingEvidence = await client.getRecord<Evidence>(TABLES.EVIDENCE, evidenceId)
 
     // Get task ID from evidence
-    const evidenceTaskIds = existingEvidence[EVIDENCE_FIELDS.task as keyof Evidence] as string[] | string
-    const taskId = Array.isArray(evidenceTaskIds) ? evidenceTaskIds[0] : evidenceTaskIds
+    const taskIds = extractTaskIds(existingEvidence[EVIDENCE_FIELDS.task as keyof Evidence])
+    const taskId = taskIds[0]
 
     // Verify ownership through task
     const isOwner = await verifyTaskOwnership(taskId, auth.userId)
