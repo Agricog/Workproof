@@ -13,6 +13,8 @@ const NewJob = lazy(() => import('./pages/NewJob'))
 const JobDetail = lazy(() => import('./pages/JobDetail'))
 const TaskDetail = lazy(() => import('./pages/TaskDetail'))
 const AuditPacks = lazy(() => import('./pages/AuditPacks'))
+const Packs = lazy(() => import('./pages/Packs'))
+const PackPreview = lazy(() => import('./pages/PackPreview'))
 const Settings = lazy(() => import('./pages/Settings'))
 
 // Loading spinner
@@ -109,6 +111,22 @@ export default function App() {
               }
             />
             <Route
+              path="/packs"
+              element={
+                <Layout>
+                  <Packs />
+                </Layout>
+              }
+            />
+            <Route
+              path="/packs/:jobId"
+              element={
+                <Layout>
+                  <PackPreview />
+                </Layout>
+              }
+            />
+            <Route
               path="/settings"
               element={
                 <Layout>
@@ -191,6 +209,22 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <AuditPacks />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/packs"
+              element={
+                <ProtectedRoute>
+                  <Packs />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/packs/:jobId"
+              element={
+                <ProtectedRoute>
+                  <PackPreview />
                 </ProtectedRoute>
               }
             />
