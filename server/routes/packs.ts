@@ -102,6 +102,7 @@ packs.get('/:jobId/pdf', async (c) => {
 
     // Get job details
     const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
+    const jobRecord = job as unknown as Record<string, unknown>
 
     // Get tasks for this job
     const tasksResult = await client.listRecords<Task>(TABLES.TASKS, { limit: 100 })
@@ -135,7 +136,7 @@ packs.get('/:jobId/pdf', async (c) => {
       size: 'A4',
       margins: { top: 50, bottom: 50, left: 50, right: 50 },
       info: {
-        Title: `Audit Pack - ${job.clientName || 'Unknown Client'}`,
+        Title: `Audit Pack - ${jobRecord.title || 'Unknown Client'}`,
         Author: 'WorkProof',
         Subject: 'NICEIC Compliance Evidence Pack',
         Creator: 'WorkProof PWA'
@@ -143,13 +144,19 @@ packs.get('/:jobId/pdf', async (c) => {
     })
 
     // Collect PDF chunks
-    const chunks: Buffer[] = []
-    doc.on('data', (chunk) => chunks.push(chunk))
+    const chunks: Uint8Array[] = []
+    doc.on('data', (chunk: Uint8Array) => chunks.push(chunk))
 
     // Colors
     const PRIMARY_GREEN = '#16a34a'
     const DARK_GRAY = '#1f2937'
     const LIGHT_GRAY = '#6b7280'
+
+    // Get job display values
+    const clientName = (jobRecord.title as string) || 'Unknown Client'
+    const address = (jobRecord['sb8d44c7cc'] as string) || 'No address'
+    const startDateRaw = jobRecord['sfc7f60ae3'] as string | undefined
+    const startDate = startDateRaw ? new Date(startDateRaw) : new Date()
 
     // ===== COVER PAGE =====
     doc.fontSize(28)
@@ -165,11 +172,11 @@ packs.get('/:jobId/pdf', async (c) => {
     doc.moveDown(3)
        .fontSize(16)
        .fillColor(DARK_GRAY)
-       .text(job.clientName || 'Unknown Client', { align: 'center' })
+       .text(clientName, { align: 'center' })
     
     doc.fontSize(11)
        .fillColor(LIGHT_GRAY)
-       .text(job.address || 'No address', { align: 'center' })
+       .text(address, { align: 'center' })
 
     doc.moveDown(2)
 
@@ -189,7 +196,7 @@ packs.get('/:jobId/pdf', async (c) => {
 
     doc.fillColor(DARK_GRAY)
        .text(jobId.substring(0, 12), 250, boxY + 15)
-       .text(job.startDate ? new Date(job.startDate).toLocaleDateString('en-GB') : 'N/A', 250, boxY + 35)
+       .text(startDate.toLocaleDateString('en-GB'), 250, boxY + 35)
        .text(String(jobTasks.length), 250, boxY + 55)
        .text(String(totalEvidence), 250, boxY + 75)
 
@@ -379,7 +386,7 @@ packs.get('/:jobId/pdf', async (c) => {
     return new Response(pdfBuffer, {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="audit-pack-${job.clientName || jobId}.pdf"`,
+        'Content-Disposition': `attachment; filename="audit-pack-${clientName}.pdf"`,
         'Content-Length': String(pdfBuffer.length)
       }
     })
