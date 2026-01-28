@@ -3,7 +3,6 @@ import { getSmartSuiteClient, TABLES } from '../lib/smartsuite.js'
 import { TASK_FIELDS, EVIDENCE_FIELDS } from '../lib/smartsuite-fields.js'
 import { authMiddleware, getAuth } from '../middleware/auth.js'
 import { rateLimitMiddleware } from '../middleware/rateLimit.js'
-import PDFDocument from 'pdfkit'
 import type { Job, Task, Evidence } from '../types/index.js'
 
 const packs = new Hono()
@@ -11,22 +10,6 @@ const packs = new Hono()
 // Apply middleware
 packs.use('*', rateLimitMiddleware)
 packs.use('*', authMiddleware)
-
-// Task type labels
-const TASK_TYPE_LABELS: Record<string, string> = {
-  consumer_unit: 'Consumer Unit Replacement',
-  lighting_circuit: 'Lighting Circuit Installation',
-  socket_circuit: 'Socket Circuit Installation',
-  shower_installation: 'Electric Shower Installation',
-  fire_alarm: 'Fire Alarm Test',
-  cooker_circuit: 'Cooker Circuit Installation',
-  ev_charger: 'EV Charger Installation',
-  solar_pv: 'Solar PV Installation',
-  rewire: 'Full/Partial Rewire',
-  eicr: 'EICR Inspection',
-  fault_finding: 'Fault Finding',
-  minor_works: 'Minor Works',
-}
 
 // Helper: Get user record ID
 async function getUserRecordId(clerkId: string): Promise<string | null> {
@@ -75,295 +58,37 @@ function extractTaskIds(taskValue: unknown): string[] {
   return []
 }
 
-// Generate PDF audit pack
+// Generate PDF audit pack - temporarily return JSON to test
 packs.get('/:jobId/pdf', async (c) => {
-  console.log('[PACKS] PDF generation started')
+  console.log('[PACKS] PDF endpoint hit')
   
   const auth = getAuth(c)
   const jobId = c.req.param('jobId')
-  const client = getSmartSuiteClient()
 
   console.log('[PACKS] Job ID:', jobId)
   console.log('[PACKS] User ID:', auth.userId)
 
   try {
     // Verify ownership
-    console.log('[PACKS] Verifying ownership...')
     const isOwner = await verifyJobOwnership(jobId, auth.userId)
     if (!isOwner) {
-      console.log('[PACKS] Ownership verification failed')
+      console.log('[PACKS] Ownership failed')
       return c.json({ error: 'Forbidden' }, 403)
     }
-    console.log('[PACKS] Ownership verified')
 
-    // Get job details
-    console.log('[PACKS] Fetching job...')
-    const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
-    const jobRecord = job as unknown as Record<string, unknown>
-    console.log('[PACKS] Job fetched:', jobRecord.title)
-
-    // Get tasks for this job
-    console.log('[PACKS] Fetching tasks...')
-    const tasksResult = await client.listRecords<Task>(TABLES.TASKS, { limit: 100 })
-    const jobTasks = tasksResult.items.filter(task => {
-      const taskRecord = task as unknown as Record<string, unknown>
-      const taskJobIds = taskRecord[TASK_FIELDS.job] as string[] | string | undefined
-      if (!taskJobIds) return false
-      const jobIds = Array.isArray(taskJobIds) ? taskJobIds : [taskJobIds]
-      return jobIds.includes(jobId)
-    })
-    console.log('[PACKS] Tasks found:', jobTasks.length)
-
-    // Get evidence for all tasks
-    console.log('[PACKS] Fetching evidence...')
-    const evidenceResult = await client.listRecords<Evidence>(TABLES.EVIDENCE, { limit: 500 })
-    console.log('[PACKS] Evidence items:', evidenceResult.items.length)
+    console.log('[PACKS] Ownership verified, returning test response')
     
-    // Group evidence by task
-    const evidenceByTask: Record<string, Evidence[]> = {}
-    jobTasks.forEach(t => { evidenceByTask[t.id] = [] })
-    
-    evidenceResult.items.forEach(item => {
-      const record = item as unknown as Record<string, unknown>
-      const taskIds = extractTaskIds(record[EVIDENCE_FIELDS.task])
-      taskIds.forEach(taskId => {
-        if (evidenceByTask[taskId]) {
-          evidenceByTask[taskId].push(item)
-        }
-      })
+    // For now, just return JSON to confirm the route works
+    return c.json({ 
+      message: 'PDF endpoint working',
+      jobId,
+      userId: auth.userId,
+      note: 'PDFKit not yet configured'
     })
 
-    const totalEvidence = Object.values(evidenceByTask).reduce((sum, arr) => sum + arr.length, 0)
-    console.log('[PACKS] Evidence grouped, total:', totalEvidence)
-
-    // Create PDF
-    console.log('[PACKS] Creating PDF document...')
-    const doc = new PDFDocument({
-      size: 'A4',
-      margins: { top: 50, bottom: 50, left: 50, right: 50 },
-      info: {
-        Title: `Audit Pack - ${jobRecord.title || 'Unknown Client'}`,
-        Author: 'WorkProof',
-        Subject: 'NICEIC Compliance Evidence Pack',
-        Creator: 'WorkProof PWA'
-      }
-    })
-
-    // Collect PDF chunks
-    const chunks: Uint8Array[] = []
-    doc.on('data', (chunk: Uint8Array) => chunks.push(chunk))
-
-    // Colors
-    const PRIMARY_GREEN = '#16a34a'
-    const DARK_GRAY = '#1f2937'
-    const LIGHT_GRAY = '#6b7280'
-
-    // Get job display values
-    const clientName = (jobRecord.title as string) || 'Unknown Client'
-    const address = (jobRecord['sb8d44c7cc'] as string) || 'No address'
-    const startDateRaw = jobRecord['sfc7f60ae3'] as string | undefined
-    const startDate = startDateRaw ? new Date(startDateRaw) : new Date()
-
-    console.log('[PACKS] Building cover page...')
-
-    // ===== COVER PAGE =====
-    doc.fontSize(28)
-       .fillColor(DARK_GRAY)
-       .text('ELECTRICAL WORK', 50, 100, { align: 'center' })
-       .text('AUDIT PACK', { align: 'center' })
-
-    doc.moveDown(2)
-       .fontSize(12)
-       .fillColor(PRIMARY_GREEN)
-       .text('NICEIC COMPLIANCE EVIDENCE', { align: 'center' })
-
-    doc.moveDown(3)
-       .fontSize(16)
-       .fillColor(DARK_GRAY)
-       .text(clientName, { align: 'center' })
-    
-    doc.fontSize(11)
-       .fillColor(LIGHT_GRAY)
-       .text(address, { align: 'center' })
-
-    doc.moveDown(2)
-
-    // Job details box
-    const boxY = doc.y
-    doc.rect(100, boxY, 395, 100)
-       .stroke('#e5e7eb')
-
-    doc.fontSize(10)
-       .fillColor(LIGHT_GRAY)
-       .text('Job Reference:', 120, boxY + 15)
-       .text('Date Started:', 120, boxY + 35)
-       .text('Tasks Completed:', 120, boxY + 55)
-       .text('Total Evidence:', 120, boxY + 75)
-
-    doc.fillColor(DARK_GRAY)
-       .text(jobId.substring(0, 12), 250, boxY + 15)
-       .text(startDate.toLocaleDateString('en-GB'), 250, boxY + 35)
-       .text(String(jobTasks.length), 250, boxY + 55)
-       .text(String(totalEvidence), 250, boxY + 75)
-
-    // Verification badges
-    doc.moveDown(5)
-    doc.fontSize(9)
-       .fillColor(PRIMARY_GREEN)
-
-    const badgeY = doc.y
-    doc.text('GPS Verified', 150, badgeY)
-       .text('Timestamps Valid', 250, badgeY)
-       .text('Hash Integrity', 370, badgeY)
-
-    // Footer
-    doc.fontSize(8)
-       .fillColor(LIGHT_GRAY)
-       .text(
-         `Generated by WorkProof on ${new Date().toLocaleString('en-GB')}`,
-         50,
-         750,
-         { align: 'center' }
-       )
-
-    console.log('[PACKS] Building evidence pages...')
-
-    // ===== EVIDENCE PAGES =====
-    for (const task of jobTasks) {
-      doc.addPage()
-
-      const taskRecord = task as unknown as Record<string, unknown>
-      const taskType = taskRecord[TASK_FIELDS.task_type] as string || 'unknown'
-      const taskLabel = TASK_TYPE_LABELS[taskType] || taskType
-
-      // Task header
-      doc.fontSize(18)
-         .fillColor(DARK_GRAY)
-         .text(taskLabel, 50, 50)
-
-      doc.fontSize(10)
-         .fillColor(LIGHT_GRAY)
-         .text(`Task ID: ${task.id.substring(0, 12)}`, 50, 75)
-
-      const taskEvidence = evidenceByTask[task.id] || []
-      doc.text(`Evidence: ${taskEvidence.length} items`, 250, 75)
-
-      doc.moveDown(2)
-
-      if (taskEvidence.length === 0) {
-        doc.fontSize(12)
-           .fillColor(LIGHT_GRAY)
-           .text('No evidence captured for this task', { align: 'center' })
-        continue
-      }
-
-      // Evidence items - list metadata (skip images for now)
-      let yPosition = doc.y + 20
-
-      for (const evidence of taskEvidence) {
-        const evRecord = evidence as unknown as Record<string, unknown>
-        const evidenceType = evRecord[EVIDENCE_FIELDS.evidence_type] as string || 'Evidence'
-        const capturedAt = evRecord[EVIDENCE_FIELDS.captured_at] as string
-        const latitude = evRecord[EVIDENCE_FIELDS.latitude] as number
-        const longitude = evRecord[EVIDENCE_FIELDS.longitude] as number
-        const photoHash = evRecord[EVIDENCE_FIELDS.photo_hash] as string
-
-        // Check if we need a new page
-        if (yPosition > 700) {
-          doc.addPage()
-          yPosition = 50
-        }
-
-        doc.fontSize(10)
-           .fillColor(DARK_GRAY)
-           .text(`- ${evidenceType}`, 50, yPosition)
-
-        doc.fontSize(8)
-           .fillColor(LIGHT_GRAY)
-
-        yPosition += 15
-        doc.text(
-          `Captured: ${capturedAt ? new Date(capturedAt).toLocaleString('en-GB') : 'No timestamp'}`,
-          70,
-          yPosition
-        )
-
-        if (latitude && longitude) {
-          yPosition += 12
-          doc.text(`GPS: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`, 70, yPosition)
-        }
-
-        if (photoHash) {
-          yPosition += 12
-          doc.text(`Hash: ${photoHash.substring(0, 32)}...`, 70, yPosition)
-        }
-
-        yPosition += 25
-      }
-    }
-
-    console.log('[PACKS] Building verification page...')
-
-    // ===== VERIFICATION PAGE =====
-    doc.addPage()
-    
-    doc.fontSize(18)
-       .fillColor(DARK_GRAY)
-       .text('Verification Summary', 50, 50)
-
-    doc.moveDown(2)
-    doc.fontSize(11)
-       .fillColor(LIGHT_GRAY)
-       .text('This audit pack contains evidence collected using the WorkProof application.')
-    
-    doc.moveDown()
-    doc.text('All evidence has been verified for:')
-    
-    doc.moveDown()
-    doc.fontSize(10)
-       .fillColor(PRIMARY_GREEN)
-       .text('GPS Location Accuracy - Photos tagged with device GPS coordinates')
-    doc.text('Timestamp Integrity - Capture times recorded at moment of photo')
-    doc.text('Hash Verification - SHA-256 checksums calculated for tamper detection')
-    doc.text('Secure Cloud Storage - Evidence stored in encrypted cloud storage')
-
-    doc.moveDown(2)
-    doc.fontSize(9)
-       .fillColor(LIGHT_GRAY)
-       .text(`Pack Generated: ${new Date().toISOString()}`)
-       .text(`Total Tasks: ${jobTasks.length}`)
-       .text(`Total Evidence Items: ${totalEvidence}`)
-
-    doc.moveDown(3)
-    doc.fontSize(8)
-       .text('This document was automatically generated by WorkProof and has not been manually altered.')
-       .text('For verification, contact support@workproof.app')
-
-    console.log('[PACKS] Finalizing PDF...')
-
-    // Finalize PDF
-    doc.end()
-
-    // Wait for PDF to finish
-    await new Promise<void>((resolve) => {
-      doc.on('end', () => resolve())
-    })
-
-    const pdfBuffer = Buffer.concat(chunks)
-    console.log('[PACKS] PDF generated, size:', pdfBuffer.length, 'bytes')
-
-    // Return PDF
-    return new Response(pdfBuffer, {
-      headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="audit-pack-${clientName}.pdf"`,
-        'Content-Length': String(pdfBuffer.length)
-      }
-    })
   } catch (error) {
-    console.error('[PACKS] Error generating PDF:', error)
-    console.error('[PACKS] Error stack:', error instanceof Error ? error.stack : 'No stack')
-    return c.json({ error: 'Failed to generate PDF' }, 500)
+    console.error('[PACKS] Error:', error)
+    return c.json({ error: 'Failed to generate PDF', details: String(error) }, 500)
   }
 })
 
