@@ -10,12 +10,10 @@ import {
   ArrowLeft,
   Download,
   MapPin,
-  Calendar,
   CheckCircle,
   Shield,
   Clock,
   Camera,
-  FileCheck,
   X,
   Loader2,
   AlertCircle
@@ -24,7 +22,7 @@ import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 import { trackPageView, trackEvent, trackError } from '../utils/analytics'
 import { jobsApi, tasksApi, evidenceApi } from '../services/api'
 import { captureError } from '../utils/errorTracking'
-import { TASK_CONFIGS } from '../types/taskConfigs'
+import { getTaskConfig } from '../types/taskConfigs'
 import type { Job, Task, TaskType } from '../types/models'
 
 // Extended evidence interface with all fields we need
@@ -32,7 +30,7 @@ interface EvidenceItem {
   id: string
   taskId: string
   evidenceType: string
-  photoUrl: string
+  photoUrl: string | null
   photoHash?: string
   latitude?: string
   longitude?: string
@@ -91,8 +89,25 @@ export default function PackPreview() {
           if (evidenceResponse.data) {
             const evidenceItems = Array.isArray(evidenceResponse.data)
               ? evidenceResponse.data
-              : (evidenceResponse.data as { items?: EvidenceItem[] }).items || []
-            allEvidence.push(...evidenceItems.map(e => ({ ...e, taskId: task.id })))
+              : (evidenceResponse.data as { items?: unknown[] }).items || []
+            
+            // Map to our interface
+            evidenceItems.forEach((e: unknown) => {
+              const item = e as Record<string, unknown>
+              allEvidence.push({
+                id: item.id as string,
+                taskId: task.id,
+                evidenceType: (item.evidenceType as string) || 'unknown',
+                photoUrl: item.photoUrl as string | null,
+                photoHash: item.photoHash as string | undefined,
+                latitude: item.latitude as string | undefined,
+                longitude: item.longitude as string | undefined,
+                gpsAccuracy: item.gpsAccuracy as string | undefined,
+                capturedAt: item.capturedAt as string | { date: string } | undefined,
+                syncedAt: item.syncedAt as string | { date: string } | undefined,
+                isSynced: item.isSynced as boolean | undefined
+              })
+            })
           }
         }
         setEvidence(allEvidence)
@@ -137,7 +152,7 @@ export default function PackPreview() {
     setIsGenerating(true)
     
     try {
-      trackEvent('pdf_generation_started', 'packs', job.id)
+      trackEvent('pdf_generation_started')
       
       // Create PDF document
       const pdfDoc = await PDFDocument.create()
@@ -204,7 +219,6 @@ export default function PackPreview() {
       
       // Address
       const address = job.address || 'No address'
-      const postcode = job.postcode || ''
       page.drawText('Site Address:', {
         x: 55,
         y: boxY - 75,
@@ -212,7 +226,7 @@ export default function PackPreview() {
         font: font,
         color: rgb(0.5, 0.5, 0.5)
       })
-      page.drawText(`${address}${postcode ? ', ' + postcode : ''}`, {
+      page.drawText(address, {
         x: 55,
         y: boxY - 95,
         size: 12,
@@ -470,7 +484,7 @@ export default function PackPreview() {
       document.body.removeChild(link)
       URL.revokeObjectURL(url)
       
-      trackEvent('pdf_generation_complete', 'packs', job.id)
+      trackEvent('pdf_generation_complete')
       
     } catch (err) {
       captureError(err, 'PackPreview.generatePDF')
@@ -483,7 +497,7 @@ export default function PackPreview() {
 
   // Calculate totals
   const totalRequired = tasks.reduce((sum, task) => {
-    const config = TASK_CONFIGS[task.taskType as TaskType]
+    const config = getTaskConfig(task.taskType as TaskType)
     return sum + (config?.requiredEvidence.length || 0)
   }, 0)
   
@@ -549,7 +563,7 @@ export default function PackPreview() {
           </h1>
           <div className="flex items-center gap-1 text-gray-500 text-sm mb-4">
             <MapPin className="w-4 h-4" />
-            {job.address}{job.postcode ? `, ${job.postcode}` : ''}
+            {job.address || 'No address'}
           </div>
           
           {/* Stats */}
@@ -587,7 +601,7 @@ export default function PackPreview() {
 
         {/* Tasks with Evidence */}
         {tasks.map(task => {
-          const config = TASK_CONFIGS[task.taskType as TaskType]
+          const config = getTaskConfig(task.taskType as TaskType)
           const taskEvidence = evidence.filter(e => e.taskId === task.id)
           
           return (
@@ -615,11 +629,17 @@ export default function PackPreview() {
                       onClick={() => setSelectedImage(item)}
                       className="relative aspect-square rounded-lg overflow-hidden bg-gray-100 hover:opacity-90 transition-opacity"
                     >
-                      <img
-                        src={item.photoUrl}
-                        alt={item.evidenceType}
-                        className="w-full h-full object-cover"
-                      />
+                      {item.photoUrl ? (
+                        <img
+                          src={item.photoUrl}
+                          alt={item.evidenceType}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Camera className="w-6 h-6 text-gray-400" />
+                        </div>
+                      )}
                       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1">
                         <p className="text-white text-[10px] truncate">
                           {(item.evidenceType || '').replace(/_/g, ' ')}
@@ -677,11 +697,17 @@ export default function PackPreview() {
           </button>
           
           <div className="max-w-2xl w-full" onClick={e => e.stopPropagation()}>
-            <img
-              src={selectedImage.photoUrl}
-              alt={selectedImage.evidenceType}
-              className="w-full rounded-lg"
-            />
+            {selectedImage.photoUrl ? (
+              <img
+                src={selectedImage.photoUrl}
+                alt={selectedImage.evidenceType}
+                className="w-full rounded-lg"
+              />
+            ) : (
+              <div className="w-full h-64 bg-gray-800 rounded-lg flex items-center justify-center">
+                <Camera className="w-12 h-12 text-gray-600" />
+              </div>
+            )}
             <div className="mt-4 text-white space-y-2">
               <h3 className="font-medium text-lg">
                 {(selectedImage.evidenceType || '').replace(/_/g, ' ')}
