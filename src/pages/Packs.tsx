@@ -1,7 +1,7 @@
 /**
  * WorkProof Packs List
  * Shows completed jobs ready for audit pack export
- * Optimized with parallel data fetching
+ * Uses server-side aggregation with Redis caching for instant loading
  */
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
@@ -18,17 +18,23 @@ import {
   RefreshCw,
   Package,
   Shield,
+  Zap,
 } from 'lucide-react'
 import { trackPageView, trackError } from '../utils/analytics'
-import { jobsApi, tasksApi } from '../services/api'
 import { captureError } from '../utils/errorTracking'
-import { getTaskTypeConfig } from '../types/taskConfigs'
-import type { Job, Task } from '../types/models'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 
-interface PackJob extends Job {
-  tasks: Task[]
+interface PackJob {
+  id: string
+  clientName: string
+  address: string
+  startDate: string
+  status: string
+  tasks: Array<{
+    id: string
+    taskType: string
+  }>
   totalEvidence: number
   totalRequired: number
   isComplete: boolean
@@ -43,6 +49,7 @@ export default function Packs() {
   const [filter, setFilter] = useState<PackFilter>('all')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isCached, setIsCached] = useState(false)
 
   useEffect(() => {
     trackPageView('/packs', 'Packs')
@@ -60,77 +67,23 @@ export default function Packs() {
     try {
       const token = await getToken()
       
-      // Get all jobs
-      const jobsResponse = await jobsApi.list(token)
-      
-      if (jobsResponse.error) {
-        setError(jobsResponse.error)
-        trackError('api_error', 'packs_load')
-        return
+      // Single API call - server does all the aggregation
+      const response = await fetch(`${API_BASE}/api/packs/list`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include'
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to load packs')
       }
 
-      // Handle response format
-      const jobData = jobsResponse.data as unknown
-      let jobItems: Job[] = []
-      
-      if (Array.isArray(jobData)) {
-        jobItems = jobData
-      } else if (jobData && typeof jobData === 'object' && 'items' in jobData) {
-        jobItems = (jobData as { items: Job[] }).items || []
-      }
+      const data = await response.json()
+      setPacks(data.items || [])
+      setIsCached(data.cached || false)
 
-      // Fetch all job details in PARALLEL (much faster!)
-      const packsWithDetails = await Promise.all(
-        jobItems.map(async (job): Promise<PackJob> => {
-          // Fetch tasks and evidence counts in parallel for each job
-          const [tasksResponse, countsResponse] = await Promise.all([
-            tasksApi.listByJob(job.id, token),
-            fetch(`${API_BASE}/api/evidence/counts-by-job?job_id=${job.id}`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-              },
-              credentials: 'include'
-            }).then(res => res.ok ? res.json() : { counts: {} }).catch(() => ({ counts: {} }))
-          ])
-
-          // Parse tasks
-          let tasks: Task[] = []
-          if (tasksResponse.data) {
-            const taskData = tasksResponse.data as unknown
-            if (Array.isArray(taskData)) {
-              tasks = taskData
-            } else if (taskData && typeof taskData === 'object' && 'items' in taskData) {
-              tasks = (taskData as { items: Task[] }).items || []
-            }
-          }
-
-          // Get evidence counts
-          const evidenceCounts: Record<string, number> = countsResponse.counts || {}
-
-          // Calculate totals
-          let totalEvidence = 0
-          let totalRequired = 0
-          
-          tasks.forEach(task => {
-            const config = getTaskTypeConfig(task.taskType)
-            totalEvidence += evidenceCounts[task.id] || 0
-            totalRequired += config.requiredEvidence.length
-          })
-
-          const isComplete = totalRequired > 0 && totalEvidence >= totalRequired
-
-          return {
-            ...job,
-            tasks,
-            totalEvidence,
-            totalRequired,
-            isComplete
-          }
-        })
-      )
-
-      setPacks(packsWithDetails)
     } catch (err) {
       const errorMessage = 'Failed to load packs. Please try again.'
       setError(errorMessage)
@@ -178,6 +131,12 @@ export default function Packs() {
             <h1 className="text-2xl font-bold text-gray-900">Audit Packs</h1>
             <p className="text-sm text-gray-500 mt-1">
               Evidence packages for NICEIC compliance
+              {isCached && (
+                <span className="inline-flex items-center gap-1 ml-2 text-green-600">
+                  <Zap className="w-3 h-3" />
+                  Instant
+                </span>
+              )}
             </p>
           </div>
           <div className="flex items-center gap-2 text-sm">
