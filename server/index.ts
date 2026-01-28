@@ -11,7 +11,6 @@ import tasks from './routes/tasks.js'
 import evidence from './routes/evidence.js'
 import auditPacks from './routes/audit-packs.js'
 import imageProxy from './routes/imageProxy.js'
-import packsApi from './routes/packsApi.js'
 
 // Webhooks
 import clerkWebhook from './webhooks/clerk.js'
@@ -40,7 +39,6 @@ app.route('/api/tasks', tasks)
 app.route('/api/evidence', evidence)
 app.route('/api/audit-packs', auditPacks)
 app.route('/api/images', imageProxy)
-app.route('/api/packs', packsApi)
 
 // Webhooks
 app.route('/webhooks', clerkWebhook)
