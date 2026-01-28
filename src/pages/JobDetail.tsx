@@ -22,7 +22,7 @@ import {
 import { getTaskTypeConfig } from '../types/taskConfigs'
 import { trackPageView, trackError } from '../utils/analytics'
 import { captureError } from '../utils/errorTracking'
-import { jobsApi, tasksApi } from '../services/api'
+import { jobsApi, tasksApi, evidenceApi } from '../services/api'
 import type { Job, Task, TaskStatus } from '../types/models'
 
 const TASK_STATUS_CONFIG: Record<TaskStatus, { label: string; color: string }> = {
@@ -32,13 +32,19 @@ const TASK_STATUS_CONFIG: Record<TaskStatus, { label: string; color: string }> =
   signed_off: { label: 'Signed Off', color: 'green' },
 }
 
+// Extended task with calculated counts
+interface TaskWithCounts extends Task {
+  calculatedEvidenceCount: number
+  calculatedRequiredCount: number
+}
+
 export default function JobDetail() {
   const { jobId } = useParams<{ jobId: string }>()
   const navigate = useNavigate()
   const { getToken } = useAuth()
 
   const [job, setJob] = useState<Job | null>(null)
-  const [tasks, setTasks] = useState<Task[]>([])
+  const [tasks, setTasks] = useState<TaskWithCounts[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showMenu, setShowMenu] = useState(false)
@@ -76,7 +82,6 @@ export default function JobDetail() {
 
       if (tasksResponse.data) {
         // Handle both array and paginated response formats
-        // API returns { items: [...], total: N }
         const taskData = tasksResponse.data as unknown
         let taskItems: Task[] = []
         
@@ -86,7 +91,40 @@ export default function JobDetail() {
           taskItems = (taskData as { items: Task[] }).items || []
         }
         
-        setTasks(taskItems)
+        // Fetch evidence counts for each task in parallel
+        const tasksWithCounts = await Promise.all(
+          taskItems.map(async (task) => {
+            const config = getTaskTypeConfig(task.taskType)
+            const requiredCount = config.requiredEvidence.length
+            
+            // Fetch evidence for this task
+            let evidenceCount = 0
+            try {
+              const evidenceResponse = await evidenceApi.listByTask(task.id, token)
+              if (evidenceResponse.data) {
+                const evidenceData = evidenceResponse.data as unknown
+                if (Array.isArray(evidenceData)) {
+                  evidenceCount = evidenceData.length
+                } else if (evidenceData && typeof evidenceData === 'object' && 'items' in evidenceData) {
+                  evidenceCount = (evidenceData as { items: unknown[] }).items?.length || 0
+                } else if (evidenceData && typeof evidenceData === 'object' && 'total' in evidenceData) {
+                  evidenceCount = (evidenceData as { total: number }).total || 0
+                }
+              }
+            } catch {
+              // If evidence fetch fails, default to 0
+              evidenceCount = 0
+            }
+            
+            return {
+              ...task,
+              calculatedEvidenceCount: evidenceCount,
+              calculatedRequiredCount: requiredCount,
+            }
+          })
+        )
+        
+        setTasks(tasksWithCounts)
       }
     } catch (err) {
       const errorMessage = 'Failed to load job details. Please try again.'
@@ -174,8 +212,9 @@ export default function JobDetail() {
     )
   }
 
-  const totalEvidence = tasks.reduce((sum, t) => sum + (t.evidenceCount || 0), 0)
-  const totalRequired = tasks.reduce((sum, t) => sum + (t.requiredEvidenceCount || 0), 0)
+  // Calculate totals from the fetched counts
+  const totalEvidence = tasks.reduce((sum, t) => sum + t.calculatedEvidenceCount, 0)
+  const totalRequired = tasks.reduce((sum, t) => sum + t.calculatedRequiredCount, 0)
   const progressPercent = totalRequired > 0 ? Math.round((totalEvidence / totalRequired) * 100) : 0
 
   // Get display values with fallbacks
@@ -314,8 +353,10 @@ export default function JobDetail() {
               aria-label="Evidence collection progress"
             >
               <div
-                className="bg-green-600 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${progressPercent}%` }}
+                className={`h-2 rounded-full transition-all duration-300 ${
+                  progressPercent >= 100 ? 'bg-green-600' : 'bg-amber-500'
+                }`}
+                style={{ width: `${Math.min(progressPercent, 100)}%` }}
               ></div>
             </div>
           </div>
@@ -336,8 +377,12 @@ export default function JobDetail() {
                 const config = getTaskTypeConfig(task.taskType)
                 const taskStatus = (task.status || 'pending') as TaskStatus
                 const statusConfig = TASK_STATUS_CONFIG[taskStatus] || TASK_STATUS_CONFIG.pending
-                const progress = task.requiredEvidenceCount
-                  ? Math.round(((task.evidenceCount || 0) / task.requiredEvidenceCount) * 100)
+                
+                // Use calculated counts
+                const evidenceCount = task.calculatedEvidenceCount
+                const requiredCount = task.calculatedRequiredCount
+                const progress = requiredCount > 0
+                  ? Math.round((evidenceCount / requiredCount) * 100)
                   : 0
 
                 return (
@@ -360,7 +405,7 @@ export default function JobDetail() {
                             {statusConfig.label}
                           </span>
                           <span className="text-sm text-gray-500">
-                            {task.evidenceCount || 0}/{task.requiredEvidenceCount || 0} photos
+                            {evidenceCount}/{requiredCount} photos
                           </span>
                         </div>
                       </div>
@@ -375,9 +420,9 @@ export default function JobDetail() {
                     >
                       <div
                         className={`h-1.5 rounded-full transition-all ${
-                          progress === 100 ? 'bg-green-600' : 'bg-amber-500'
+                          progress >= 100 ? 'bg-green-600' : 'bg-amber-500'
                         }`}
-                        style={{ width: `${progress}%` }}
+                        style={{ width: `${Math.min(progress, 100)}%` }}
                       ></div>
                     </div>
                   </Link>
