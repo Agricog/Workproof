@@ -26,12 +26,27 @@ import { trackPageView, trackError } from '../utils/analytics'
 import { jobsApi, tasksApi, evidenceApi } from '../services/api'
 import { captureError } from '../utils/errorTracking'
 import { getTaskTypeConfig } from '../types/taskConfigs'
-import type { Job, Task, Evidence } from '../types/models'
+import type { Job, Task } from '../types/models'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 
+// Local interface for evidence as returned by API
+interface EvidenceItem {
+  id: string
+  taskId: string
+  evidenceType: string
+  photoUrl: string
+  photoHash?: string
+  latitude?: number
+  longitude?: number
+  gpsAccuracy?: number
+  capturedAt?: string
+  syncedAt?: string
+  isSynced?: boolean
+}
+
 interface TaskWithEvidence extends Task {
-  evidence: Evidence[]
+  evidence: EvidenceItem[]
   requiredCount: number
 }
 
@@ -45,7 +60,7 @@ export default function PackPreview() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isDownloading, setIsDownloading] = useState(false)
-  const [selectedImage, setSelectedImage] = useState<Evidence | null>(null)
+  const [selectedImage, setSelectedImage] = useState<EvidenceItem | null>(null)
 
   useEffect(() => {
     trackPageView(`/packs/${jobId}`, 'Pack Preview')
@@ -89,16 +104,16 @@ export default function PackPreview() {
       
       for (const task of taskItems) {
         const config = getTaskTypeConfig(task.taskType)
-        let evidence: Evidence[] = []
+        let evidence: EvidenceItem[] = []
         
         try {
           const evidenceResponse = await evidenceApi.listByTask(task.id, token)
           if (evidenceResponse.data) {
             const evData = evidenceResponse.data as unknown
             if (Array.isArray(evData)) {
-              evidence = evData
+              evidence = evData as EvidenceItem[]
             } else if (evData && typeof evData === 'object' && 'items' in evData) {
-              evidence = (evData as { items: Evidence[] }).items || []
+              evidence = (evData as { items: EvidenceItem[] }).items || []
             }
           }
         } catch {
