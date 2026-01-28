@@ -147,10 +147,22 @@ export default function PackPreview() {
     })
   }
 
-  // Fetch image and return as bytes
+  // Fetch image via server proxy to avoid CORS
   const fetchImageBytes = async (url: string): Promise<Uint8Array | null> => {
     try {
-      const response = await fetch(url)
+      const token = await getToken()
+      const API_BASE = import.meta.env.VITE_API_URL || ''
+      
+      // Use server proxy to fetch image (avoids CORS)
+      const proxyUrl = `${API_BASE}/api/images/proxy?url=${encodeURIComponent(url)}`
+      
+      const response = await fetch(proxyUrl, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        credentials: 'include'
+      })
+      
       if (!response.ok) return null
       const arrayBuffer = await response.arrayBuffer()
       return new Uint8Array(arrayBuffer)
