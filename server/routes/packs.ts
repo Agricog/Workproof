@@ -75,36 +75,35 @@ function extractTaskIds(taskValue: unknown): string[] {
   return []
 }
 
-// Helper: Fetch image as buffer
-async function fetchImageBuffer(url: string): Promise<Buffer | null> {
-  try {
-    const response = await fetch(url)
-    if (!response.ok) return null
-    const arrayBuffer = await response.arrayBuffer()
-    return Buffer.from(arrayBuffer)
-  } catch {
-    return null
-  }
-}
-
 // Generate PDF audit pack
 packs.get('/:jobId/pdf', async (c) => {
+  console.log('[PACKS] PDF generation started')
+  
   const auth = getAuth(c)
   const jobId = c.req.param('jobId')
   const client = getSmartSuiteClient()
 
+  console.log('[PACKS] Job ID:', jobId)
+  console.log('[PACKS] User ID:', auth.userId)
+
   try {
     // Verify ownership
+    console.log('[PACKS] Verifying ownership...')
     const isOwner = await verifyJobOwnership(jobId, auth.userId)
     if (!isOwner) {
+      console.log('[PACKS] Ownership verification failed')
       return c.json({ error: 'Forbidden' }, 403)
     }
+    console.log('[PACKS] Ownership verified')
 
     // Get job details
+    console.log('[PACKS] Fetching job...')
     const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
     const jobRecord = job as unknown as Record<string, unknown>
+    console.log('[PACKS] Job fetched:', jobRecord.title)
 
     // Get tasks for this job
+    console.log('[PACKS] Fetching tasks...')
     const tasksResult = await client.listRecords<Task>(TABLES.TASKS, { limit: 100 })
     const jobTasks = tasksResult.items.filter(task => {
       const taskRecord = task as unknown as Record<string, unknown>
@@ -113,9 +112,12 @@ packs.get('/:jobId/pdf', async (c) => {
       const jobIds = Array.isArray(taskJobIds) ? taskJobIds : [taskJobIds]
       return jobIds.includes(jobId)
     })
+    console.log('[PACKS] Tasks found:', jobTasks.length)
 
     // Get evidence for all tasks
+    console.log('[PACKS] Fetching evidence...')
     const evidenceResult = await client.listRecords<Evidence>(TABLES.EVIDENCE, { limit: 500 })
+    console.log('[PACKS] Evidence items:', evidenceResult.items.length)
     
     // Group evidence by task
     const evidenceByTask: Record<string, Evidence[]> = {}
@@ -131,7 +133,11 @@ packs.get('/:jobId/pdf', async (c) => {
       })
     })
 
+    const totalEvidence = Object.values(evidenceByTask).reduce((sum, arr) => sum + arr.length, 0)
+    console.log('[PACKS] Evidence grouped, total:', totalEvidence)
+
     // Create PDF
+    console.log('[PACKS] Creating PDF document...')
     const doc = new PDFDocument({
       size: 'A4',
       margins: { top: 50, bottom: 50, left: 50, right: 50 },
@@ -157,6 +163,8 @@ packs.get('/:jobId/pdf', async (c) => {
     const address = (jobRecord['sb8d44c7cc'] as string) || 'No address'
     const startDateRaw = jobRecord['sfc7f60ae3'] as string | undefined
     const startDate = startDateRaw ? new Date(startDateRaw) : new Date()
+
+    console.log('[PACKS] Building cover page...')
 
     // ===== COVER PAGE =====
     doc.fontSize(28)
@@ -192,8 +200,6 @@ packs.get('/:jobId/pdf', async (c) => {
        .text('Tasks Completed:', 120, boxY + 55)
        .text('Total Evidence:', 120, boxY + 75)
 
-    const totalEvidence = Object.values(evidenceByTask).reduce((sum, arr) => sum + arr.length, 0)
-
     doc.fillColor(DARK_GRAY)
        .text(jobId.substring(0, 12), 250, boxY + 15)
        .text(startDate.toLocaleDateString('en-GB'), 250, boxY + 35)
@@ -206,9 +212,9 @@ packs.get('/:jobId/pdf', async (c) => {
        .fillColor(PRIMARY_GREEN)
 
     const badgeY = doc.y
-    doc.text('✓ GPS Verified', 150, badgeY)
-       .text('✓ Timestamps Valid', 250, badgeY)
-       .text('✓ Hash Integrity', 370, badgeY)
+    doc.text('GPS Verified', 150, badgeY)
+       .text('Timestamps Valid', 250, badgeY)
+       .text('Hash Integrity', 370, badgeY)
 
     // Footer
     doc.fontSize(8)
@@ -219,6 +225,8 @@ packs.get('/:jobId/pdf', async (c) => {
          750,
          { align: 'center' }
        )
+
+    console.log('[PACKS] Building evidence pages...')
 
     // ===== EVIDENCE PAGES =====
     for (const task of jobTasks) {
@@ -249,93 +257,52 @@ packs.get('/:jobId/pdf', async (c) => {
         continue
       }
 
-      // Evidence items
+      // Evidence items - list metadata (skip images for now)
       let yPosition = doc.y + 20
-      let colIndex = 0
 
       for (const evidence of taskEvidence) {
         const evRecord = evidence as unknown as Record<string, unknown>
-        const photoUrl = evRecord[EVIDENCE_FIELDS.photo_url] as string
         const evidenceType = evRecord[EVIDENCE_FIELDS.evidence_type] as string || 'Evidence'
         const capturedAt = evRecord[EVIDENCE_FIELDS.captured_at] as string
         const latitude = evRecord[EVIDENCE_FIELDS.latitude] as number
         const longitude = evRecord[EVIDENCE_FIELDS.longitude] as number
-        const gpsAccuracy = evRecord[EVIDENCE_FIELDS.gps_accuracy] as number
         const photoHash = evRecord[EVIDENCE_FIELDS.photo_hash] as string
 
         // Check if we need a new page
-        if (yPosition > 650) {
+        if (yPosition > 700) {
           doc.addPage()
           yPosition = 50
-          colIndex = 0
         }
 
-        const xOffset = colIndex === 0 ? 50 : 300
-        const imageWidth = 200
-        const imageHeight = 150
-
-        // Try to fetch and embed image
-        if (photoUrl) {
-          const imageBuffer = await fetchImageBuffer(photoUrl)
-          if (imageBuffer) {
-            try {
-              doc.image(imageBuffer, xOffset, yPosition, {
-                width: imageWidth,
-                height: imageHeight,
-                fit: [imageWidth, imageHeight]
-              })
-            } catch {
-              // If image fails, draw placeholder
-              doc.rect(xOffset, yPosition, imageWidth, imageHeight)
-                 .stroke('#e5e7eb')
-              doc.fontSize(10)
-                 .fillColor(LIGHT_GRAY)
-                 .text('Image unavailable', xOffset, yPosition + 70, { width: imageWidth, align: 'center' })
-            }
-          }
-        }
-
-        // Evidence metadata below image
-        const metaY = yPosition + imageHeight + 5
-        doc.fontSize(9)
+        doc.fontSize(10)
            .fillColor(DARK_GRAY)
-           .text(evidenceType, xOffset, metaY, { width: imageWidth })
+           .text(`- ${evidenceType}`, 50, yPosition)
 
-        doc.fontSize(7)
+        doc.fontSize(8)
            .fillColor(LIGHT_GRAY)
-           .text(
-             capturedAt ? new Date(capturedAt).toLocaleString('en-GB') : 'No timestamp',
-             xOffset,
-             metaY + 12,
-             { width: imageWidth }
-           )
+
+        yPosition += 15
+        doc.text(
+          `Captured: ${capturedAt ? new Date(capturedAt).toLocaleString('en-GB') : 'No timestamp'}`,
+          70,
+          yPosition
+        )
 
         if (latitude && longitude) {
-          doc.text(
-            `GPS: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}${gpsAccuracy ? ` (±${Math.round(gpsAccuracy)}m)` : ''}`,
-            xOffset,
-            metaY + 22,
-            { width: imageWidth }
-          )
+          yPosition += 12
+          doc.text(`GPS: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`, 70, yPosition)
         }
 
         if (photoHash) {
-          doc.text(
-            `Hash: ${photoHash.substring(0, 16)}...`,
-            xOffset,
-            metaY + 32,
-            { width: imageWidth }
-          )
+          yPosition += 12
+          doc.text(`Hash: ${photoHash.substring(0, 32)}...`, 70, yPosition)
         }
 
-        // Move to next column or row
-        colIndex++
-        if (colIndex >= 2) {
-          colIndex = 0
-          yPosition += imageHeight + 60
-        }
+        yPosition += 25
       }
     }
+
+    console.log('[PACKS] Building verification page...')
 
     // ===== VERIFICATION PAGE =====
     doc.addPage()
@@ -355,10 +322,10 @@ packs.get('/:jobId/pdf', async (c) => {
     doc.moveDown()
     doc.fontSize(10)
        .fillColor(PRIMARY_GREEN)
-       .text('✓  GPS Location Accuracy - Photos tagged with device GPS coordinates')
-    doc.text('✓  Timestamp Integrity - Capture times recorded at moment of photo')
-    doc.text('✓  Hash Verification - SHA-256 checksums calculated for tamper detection')
-    doc.text('✓  Secure Cloud Storage - Evidence stored in encrypted cloud storage')
+       .text('GPS Location Accuracy - Photos tagged with device GPS coordinates')
+    doc.text('Timestamp Integrity - Capture times recorded at moment of photo')
+    doc.text('Hash Verification - SHA-256 checksums calculated for tamper detection')
+    doc.text('Secure Cloud Storage - Evidence stored in encrypted cloud storage')
 
     doc.moveDown(2)
     doc.fontSize(9)
@@ -372,6 +339,8 @@ packs.get('/:jobId/pdf', async (c) => {
        .text('This document was automatically generated by WorkProof and has not been manually altered.')
        .text('For verification, contact support@workproof.app')
 
+    console.log('[PACKS] Finalizing PDF...')
+
     // Finalize PDF
     doc.end()
 
@@ -381,6 +350,7 @@ packs.get('/:jobId/pdf', async (c) => {
     })
 
     const pdfBuffer = Buffer.concat(chunks)
+    console.log('[PACKS] PDF generated, size:', pdfBuffer.length, 'bytes')
 
     // Return PDF
     return new Response(pdfBuffer, {
@@ -391,7 +361,8 @@ packs.get('/:jobId/pdf', async (c) => {
       }
     })
   } catch (error) {
-    console.error('Error generating PDF:', error)
+    console.error('[PACKS] Error generating PDF:', error)
+    console.error('[PACKS] Error stack:', error instanceof Error ? error.stack : 'No stack')
     return c.json({ error: 'Failed to generate PDF' }, 500)
   }
 })
