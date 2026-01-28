@@ -19,7 +19,7 @@ import {
   AlertCircle
 } from 'lucide-react'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
-import { trackPageView, trackEvent, trackError } from '../utils/analytics'
+import { trackPageView, trackError } from '../utils/analytics'
 import { jobsApi, tasksApi, evidenceApi } from '../services/api'
 import { captureError } from '../utils/errorTracking'
 import { getTaskTypeConfig } from '../types/taskConfigs'
@@ -152,8 +152,6 @@ export default function PackPreview() {
     setIsGenerating(true)
     
     try {
-      trackEvent('pdf_generation_started')
-      
       // Create PDF document
       const pdfDoc = await PDFDocument.create()
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
@@ -483,8 +481,6 @@ export default function PackPreview() {
       link.click()
       document.body.removeChild(link)
       URL.revokeObjectURL(url)
-      
-      trackEvent('pdf_generation_complete')
       
     } catch (err) {
       captureError(err, 'PackPreview.generatePDF')
