@@ -18,6 +18,7 @@ import {
   Archive,
   AlertCircle,
   RefreshCw,
+  Trash2,
 } from 'lucide-react'
 import { trackPageView, trackError } from '../utils/analytics'
 import { jobsApi } from '../services/api'
@@ -38,6 +39,7 @@ export default function Jobs() {
   const [statusFilter, setStatusFilter] = useState<JobStatus | 'all'>('all')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [deletingJobId, setDeletingJobId] = useState<string | null>(null)
 
   useEffect(() => {
     trackPageView('/jobs', 'Jobs')
@@ -64,7 +66,6 @@ export default function Jobs() {
       
       if (response.data) {
         // Handle both array and paginated response formats
-        // API returns { items: [...], total: N }
         const jobData = response.data as unknown
         let jobItems: Job[] = []
         
@@ -86,6 +87,35 @@ export default function Jobs() {
       )
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleDeleteJob = async (e: React.MouseEvent, jobId: string, clientName: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    if (!confirm(`Delete job for "${clientName}"? This cannot be undone.`)) {
+      return
+    }
+
+    setDeletingJobId(jobId)
+
+    try {
+      const token = await getToken()
+      const response = await jobsApi.delete(jobId, token)
+
+      if (response.error) {
+        setError(response.error)
+        return
+      }
+
+      // Remove from local state
+      setJobs(prev => prev.filter(job => job.id !== jobId))
+    } catch (err) {
+      captureError(err, 'Jobs.handleDeleteJob')
+      setError('Failed to delete job. Please try again.')
+    } finally {
+      setDeletingJobId(null)
     }
   }
 
@@ -230,55 +260,74 @@ export default function Jobs() {
               const jobStatus = (job.status || 'active') as JobStatus
               const statusConfig = STATUS_CONFIG[jobStatus] || STATUS_CONFIG.active
               const StatusIcon = statusConfig.icon
+              const isDeleting = deletingJobId === job.id
 
               return (
-                <Link
+                <div
                   key={job.id}
-                  to={`/jobs/${job.id}`}
-                  className="card block hover:border-gray-300 transition-colors"
+                  className="card relative hover:border-gray-300 transition-colors"
                   role="listitem"
                 >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="font-medium text-gray-900 truncate">
-                          {job.clientName || 'Unknown Client'}
-                        </h3>
-                        <span
-                          className={`badge badge-${statusConfig.color} flex items-center gap-1`}
-                        >
-                          <StatusIcon className="w-3 h-3" aria-hidden="true" />
-                          {statusConfig.label}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1 text-sm text-gray-500">
-                        <MapPin className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
-                        <span className="truncate">{job.address || 'No address'}</span>
-                      </div>
-                      <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
-                        <div className="flex items-center gap-1">
-                          <Calendar className="w-3 h-3" aria-hidden="true" />
-                          {job.startDate ? new Date(job.startDate).toLocaleDateString('en-GB', {
-                            day: 'numeric',
-                            month: 'short',
-                          }) : 'No date'}
+                  <Link
+                    to={`/jobs/${job.id}`}
+                    className="block"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0 pr-12">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="font-medium text-gray-900 truncate">
+                            {job.clientName || 'Unknown Client'}
+                          </h3>
+                          <span
+                            className={`badge badge-${statusConfig.color} flex items-center gap-1`}
+                          >
+                            <StatusIcon className="w-3 h-3" aria-hidden="true" />
+                            {statusConfig.label}
+                          </span>
                         </div>
-                        <div>
-                          {job.taskCount || 0} task{(job.taskCount || 0) !== 1 ? 's' : ''}
+                        <div className="flex items-center gap-1 text-sm text-gray-500">
+                          <MapPin className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
+                          <span className="truncate">{job.address || 'No address'}</span>
                         </div>
+                        <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
+                          <div className="flex items-center gap-1">
+                            <Calendar className="w-3 h-3" aria-hidden="true" />
+                            {job.startDate ? new Date(job.startDate).toLocaleDateString('en-GB', {
+                              day: 'numeric',
+                              month: 'short',
+                            }) : 'No date'}
+                          </div>
+                          <div>
+                            {job.taskCount || 0} task{(job.taskCount || 0) !== 1 ? 's' : ''}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-right">
+                          <p className="text-sm font-medium text-gray-900">
+                            {job.evidenceCount || 0}/{job.completedEvidenceCount || 0}
+                          </p>
+                          <p className="text-xs text-gray-500">evidence</p>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-400" aria-hidden="true" />
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 ml-4">
-                      <div className="text-right">
-                        <p className="text-sm font-medium text-gray-900">
-                          {job.evidenceCount || 0}/{job.completedEvidenceCount || 0}
-                        </p>
-                        <p className="text-xs text-gray-500">evidence</p>
-                      </div>
-                      <ChevronRight className="w-5 h-5 text-gray-400" aria-hidden="true" />
-                    </div>
-                  </div>
-                </Link>
+                  </Link>
+                  
+                  {/* Delete Button */}
+                  <button
+                    onClick={(e) => handleDeleteJob(e, job.id, job.clientName || 'Unknown Client')}
+                    disabled={isDeleting}
+                    className="absolute top-3 right-3 p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                    aria-label={`Delete job for ${job.clientName || 'Unknown Client'}`}
+                  >
+                    {isDeleting ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
               )
             })}
           </div>
@@ -287,3 +336,4 @@ export default function Jobs() {
     </>
   )
 }
+
