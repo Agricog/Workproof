@@ -2,7 +2,7 @@
  * WorkProof Task Detail
  * View task with evidence checklist and photo capture
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
 import { useAuth } from '@clerk/clerk-react'
@@ -36,6 +36,9 @@ export default function TaskDetail() {
   const [showCamera, setShowCamera] = useState(false)
   const [selectedEvidenceType, setSelectedEvidenceType] = useState<EvidenceType | null>(null)
   const [capturedEvidence, setCapturedEvidence] = useState<Record<string, boolean>>({})
+  
+  // Track locally captured evidence to prevent API overwrites
+  const localCapturesRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     loadTaskData()
@@ -76,14 +79,27 @@ export default function TaskDetail() {
               evidenceItems = (evidenceData as { items: Array<{ evidenceType?: string }> }).items || []
             }
             
-            // Mark captured evidence types
-            const captured: Record<string, boolean> = {}
+            // Build captured map from API
+            const apiCaptured: Record<string, boolean> = {}
             evidenceItems.forEach((ev) => {
               if (ev.evidenceType) {
-                captured[ev.evidenceType] = true
+                apiCaptured[ev.evidenceType] = true
               }
             })
-            setCapturedEvidence(captured)
+            
+            // Merge with local captures (local takes priority)
+            setCapturedEvidence(prev => {
+              const merged = { ...apiCaptured }
+              // Ensure all local captures are preserved
+              localCapturesRef.current.forEach(type => {
+                merged[type] = true
+              })
+              // Also preserve any existing state not in API yet
+              Object.keys(prev).forEach(type => {
+                merged[type] = true
+              })
+              return merged
+            })
           }
         } catch (evidenceErr) {
           // Evidence API might not exist yet - continue without it
@@ -128,6 +144,9 @@ export default function TaskDetail() {
 
   const handleCaptureComplete = async (evidence: StoredEvidence) => {
     if (evidence.evidenceType) {
+      // Track this capture locally so it won't be wiped by API refresh
+      localCapturesRef.current.add(evidence.evidenceType)
+      
       setCapturedEvidence((prev) => {
         const updated = {
           ...prev,
@@ -154,8 +173,8 @@ export default function TaskDetail() {
     setShowCamera(false)
     setSelectedEvidenceType(null)
 
-    // Refresh task data to get updated evidence count
-    loadTaskData()
+    // Note: We no longer call loadTaskData() here to avoid race conditions
+    // The local state is the source of truth for captured evidence
   }
 
   const updateTaskStatus = async (status: TaskStatus) => {
