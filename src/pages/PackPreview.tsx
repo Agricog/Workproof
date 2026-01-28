@@ -478,6 +478,8 @@ export default function PackPreview() {
       
       for (let i = 0; i < evidence.length; i++) {
         const item = evidence[i]
+        if (!item) continue
+        
         setGeneratingStatus(`Embedding photos (${i + 1}/${evidence.length})...`)
         
         if (!item.photoUrl) continue
