@@ -66,6 +66,24 @@ async function verifyTaskOwnership(taskId: string, clerkId: string): Promise<boo
   return jobUserId === userRecordId
 }
 
+// Helper: Extract value from SmartSuite single-select field
+function extractSingleSelectValue(field: unknown): string | null {
+  if (!field) return null
+  if (typeof field === 'string') return field
+  if (typeof field === 'object' && field !== null) {
+    const obj = field as Record<string, unknown>
+    // SmartSuite returns { value: "...", label: "..." } for single-select
+    if ('value' in obj && typeof obj.value === 'string') {
+      return obj.value
+    }
+    // Sometimes it's just the label
+    if ('label' in obj && typeof obj.label === 'string') {
+      return obj.label.toLowerCase()
+    }
+  }
+  return null
+}
+
 // Transform SmartSuite evidence to API format
 function transformEvidence(item: Record<string, unknown>): Record<string, unknown> {
   const taskIds = item[EVIDENCE_FIELDS.task] as string[] | string | undefined
@@ -83,11 +101,22 @@ function transformEvidence(item: Record<string, unknown>): Record<string, unknow
     syncedAt = (syncedAt as Record<string, unknown>).date
   }
 
+  // Handle isSynced checkbox field
+  let isSynced = false
+  const isSyncedField = item[EVIDENCE_FIELDS.is_synced]
+  if (typeof isSyncedField === 'boolean') {
+    isSynced = isSyncedField
+  } else if (isSyncedField && typeof isSyncedField === 'object') {
+    // SmartSuite checkbox returns { completed_items: n }
+    const obj = isSyncedField as Record<string, unknown>
+    isSynced = (obj.completed_items as number) > 0
+  }
+
   return {
     id: item.id,
     taskId: taskId || null,
-    evidenceType: item[EVIDENCE_FIELDS.evidence_type] || null,
-    photoStage: item[EVIDENCE_FIELDS.photo_stage] || null,  // NEW
+    evidenceType: extractSingleSelectValue(item[EVIDENCE_FIELDS.evidence_type]),
+    photoStage: extractSingleSelectValue(item[EVIDENCE_FIELDS.photo_stage]),
     photoUrl: item[EVIDENCE_FIELDS.photo_url] || null,
     photoHash: item[EVIDENCE_FIELDS.photo_hash] || null,
     latitude: item[EVIDENCE_FIELDS.latitude] || null,
@@ -95,7 +124,7 @@ function transformEvidence(item: Record<string, unknown>): Record<string, unknow
     gpsAccuracy: item[EVIDENCE_FIELDS.gps_accuracy] || null,
     capturedAt: capturedAt || null,
     syncedAt: syncedAt || null,
-    isSynced: item[EVIDENCE_FIELDS.is_synced] || false
+    isSynced: isSynced
   }
 }
 
@@ -327,7 +356,7 @@ evidence.post('/', async (c) => {
     // Support both formats
     const taskId = (body.task_id || body.taskId) as string
     const evidenceType = (body.evidence_type || body.evidenceType) as string
-    const photoStage = (body.photo_stage || body.photoStage) as string | undefined  // NEW
+    const photoStage = (body.photo_stage || body.photoStage) as string | undefined
     const photoUrl = (body.photo_url || body.photoUrl) as string
     const photoHash = (body.photo_hash || body.photoHash) as string
 
