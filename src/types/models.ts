@@ -32,7 +32,7 @@ export interface User extends BaseRecord {
 // JOB
 // ============================================================================
 
-export type JobStatus = 'draft' | 'in_progress' | 'completed' | 'archived'
+export type JobStatus = 'active' | 'draft' | 'in_progress' | 'completed' | 'archived'
 
 export interface Job extends BaseRecord {
   userId: string
