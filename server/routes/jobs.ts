@@ -30,9 +30,12 @@ function userOwnsJob(job: Record<string, unknown>, userRecordId: string): boolea
 function getJobStatus(job: Record<string, unknown>): string {
   const statusRaw = job[JOB_FIELDS.status]
   if (!statusRaw) return 'active'
-  if (typeof statusRaw === 'string') return statusRaw
-  if (typeof statusRaw === 'object' && statusRaw !== null && 'value' in statusRaw) {
-    return (statusRaw as { value: string }).value
+  if (typeof statusRaw === 'string') return statusRaw.toLowerCase()
+  if (typeof statusRaw === 'object' && statusRaw !== null) {
+    // SmartSuite single-select returns { value: "option_id", label: "Archived" }
+    const statusObj = statusRaw as { value?: string; label?: string }
+    if (statusObj.label) return statusObj.label.toLowerCase()
+    if (statusObj.value) return statusObj.value.toLowerCase()
   }
   return 'active'
 }
