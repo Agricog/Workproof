@@ -34,27 +34,6 @@ interface ListResponse<T> {
   total: number
 }
 
-// Retry configuration
-const MAX_RETRIES = 3
-const INITIAL_DELAY_MS = 1000  // 1 second
-const MAX_DELAY_MS = 10000     // 10 seconds
-
-/**
- * Sleep for specified milliseconds
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-/**
- * Calculate exponential backoff delay with jitter
- */
-function getBackoffDelay(attempt: number): number {
-  const exponentialDelay = INITIAL_DELAY_MS * Math.pow(2, attempt)
-  const jitter = Math.random() * 500  // Add up to 500ms jitter
-  return Math.min(exponentialDelay + jitter, MAX_DELAY_MS)
-}
-
 class SmartSuiteClient {
   private apiKey: string
   private workspaceId: string
@@ -66,8 +45,7 @@ class SmartSuiteClient {
 
   private async request(
     endpoint: string,
-    options: RequestInit = {},
-    retryCount: number = 0
+    options: RequestInit = {}
   ): Promise<unknown> {
     const url = `${SMARTSUITE_API_URL}${endpoint}`
     
@@ -80,19 +58,6 @@ class SmartSuiteClient {
         ...options.headers
       }
     })
-
-    // Handle rate limiting with retry
-    if (response.status === 429) {
-      if (retryCount < MAX_RETRIES) {
-        const delay = getBackoffDelay(retryCount)
-        console.log(`SmartSuite rate limited (429). Retrying in ${Math.round(delay)}ms... (attempt ${retryCount + 1}/${MAX_RETRIES})`)
-        await sleep(delay)
-        return this.request(endpoint, options, retryCount + 1)
-      } else {
-        console.error('SmartSuite rate limit: Max retries exceeded')
-        throw new Error('SmartSuite API rate limit exceeded after retries')
-      }
-    }
 
     if (!response.ok) {
       const errorBody = await response.text()
@@ -251,4 +216,3 @@ export function getSmartSuiteClient(): SmartSuiteClient {
 }
 
 export type { SmartSuiteRecord, QueryOptions, ListResponse }
-
