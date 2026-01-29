@@ -26,20 +26,6 @@ function userOwnsJob(job: Record<string, unknown>, userRecordId: string): boolea
   return userIds.includes(userRecordId)
 }
 
-// Helper: Extract status value from SmartSuite format (handles both string and object)
-function getJobStatus(job: Record<string, unknown>): string {
-  const statusRaw = job[JOB_FIELDS.status]
-  if (!statusRaw) return 'active'
-  if (typeof statusRaw === 'string') return statusRaw.toLowerCase()
-  if (typeof statusRaw === 'object' && statusRaw !== null) {
-    // SmartSuite single-select returns { value: "option_id", label: "Archived" }
-    const statusObj = statusRaw as { value?: string; label?: string }
-    if (statusObj.label) return statusObj.label.toLowerCase()
-    if (statusObj.value) return statusObj.value.toLowerCase()
-  }
-  return 'active'
-}
-
 // Helper: Transform SmartSuite job record to readable format
 function transformJob(record: Record<string, unknown>): Record<string, unknown> {
   // Handle date field - may be object with date property
@@ -53,6 +39,15 @@ function transformJob(record: Record<string, unknown>): Record<string, unknown> 
     startDate = new Date().toISOString().split('T')[0]
   }
 
+  // Handle status field - may be string ID or object
+  const statusRaw = record[JOB_FIELDS.status]
+  let status = 'active'
+  if (typeof statusRaw === 'string') {
+    status = statusRaw
+  } else if (statusRaw && typeof statusRaw === 'object' && 'label' in statusRaw) {
+    status = (statusRaw as { label: string }).label.toLowerCase()
+  }
+
   return {
     id: record.id,
     title: record.title,
@@ -61,7 +56,7 @@ function transformJob(record: Record<string, unknown>): Record<string, unknown> 
     postcode: record[JOB_FIELDS.postcode] || '',
     clientPhone: record[JOB_FIELDS.client_phone],
     clientEmail: record[JOB_FIELDS.client_email],
-    status: getJobStatus(record),
+    status: status,
     startDate: startDate,
     completionDate: record[JOB_FIELDS.completion_date],
     notes: record[JOB_FIELDS.notes],
@@ -89,30 +84,21 @@ jobs.get('/', async (c) => {
     const result = await client.listRecords<Job>(TABLES.JOBS, {
       limit: 100
     })
-    // DEBUG: Log first job's status to see format
-    if (result.items.length > 0) {
-      const firstJob = result.items[0] as unknown as Record<string, unknown>
-      console.log('DEBUG job status field:', JSON.stringify(firstJob[JOB_FIELDS.status]))
-    }
 
     // Filter by user ownership in memory
     let filteredItems = result.items.filter(item => 
       userOwnsJob(item as unknown as Record<string, unknown>, userRecordId)
     )
 
-    // Exclude archived jobs by default (unless specifically requested)
-    if (status !== 'archived') {
-      filteredItems = filteredItems.filter(item => {
-        const jobStatus = getJobStatus(item as unknown as Record<string, unknown>)
-        return jobStatus !== 'archived'
-      })
-    }
-
     // Apply status filter if provided
     if (status) {
       filteredItems = filteredItems.filter(item => {
-        const jobStatus = getJobStatus(item as unknown as Record<string, unknown>)
-        return jobStatus === status
+        const jobRecord = item as unknown as Record<string, unknown>
+        const statusRaw = jobRecord[JOB_FIELDS.status]
+        if (typeof statusRaw === 'string') {
+          return statusRaw === status
+        }
+        return false
       })
     }
 
@@ -354,7 +340,7 @@ jobs.put('/:id', async (c) => {
   }
 })
 
-// Delete job (soft delete - set status to archived)
+// Delete job (hard delete from SmartSuite)
 jobs.delete('/:id', async (c) => {
   const auth = getAuth(c)
   const jobId = c.req.param('id')
@@ -369,10 +355,8 @@ jobs.delete('/:id', async (c) => {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    // Soft delete by setting status to archived
-    await client.updateRecord<Job>(TABLES.JOBS, jobId, {
-      [JOB_FIELDS.status]: 'archived'
-    } as Partial<Job>)
+    // Hard delete the job from SmartSuite
+    await client.deleteRecord(TABLES.JOBS, jobId)
 
     return c.json({ success: true })
   } catch (error) {
