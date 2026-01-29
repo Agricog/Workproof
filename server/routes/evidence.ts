@@ -20,6 +20,12 @@ const R2_BUCKET = process.env.R2_BUCKET_NAME || 'workproof-evidence'
 const userIdCache = new Map<string, { id: string; timestamp: number }>()
 const USER_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
+// Cache for SmartSuite field option mappings (option_id -> label)
+let evidenceTypeOptions: Map<string, string> | null = null
+let photoStageOptions: Map<string, string> | null = null
+let optionsCacheTimestamp = 0
+const OPTIONS_CACHE_TTL = 30 * 60 * 1000 // 30 minutes
+
 // Map frontend evidence types to SmartSuite dropdown labels
 const EVIDENCE_TYPE_MAP: Record<string, string> = {
   'before_photo': 'Before Photo',
@@ -52,6 +58,64 @@ const PHOTO_STAGE_MAP: Record<string, string> = {
   'before': 'Before',
   'during': 'During',
   'after': 'After',
+}
+
+// Fetch field options from SmartSuite API
+async function fetchFieldOptions(): Promise<void> {
+  if (evidenceTypeOptions && photoStageOptions && Date.now() - optionsCacheTimestamp < OPTIONS_CACHE_TTL) {
+    return // Use cached options
+  }
+
+  console.log('[EVIDENCE] Fetching field options from SmartSuite...')
+  
+  try {
+    const response = await fetch(`https://app.smartsuite.com/api/v1/applications/${TABLES.EVIDENCE}/`, {
+      headers: {
+        'Authorization': `Token ${process.env.SMARTSUITE_API_KEY}`,
+        'Account-Id': process.env.SMARTSUITE_ACCOUNT_ID || '',
+        'Content-Type': 'application/json'
+      }
+    })
+
+    if (!response.ok) {
+      console.error('[EVIDENCE] Failed to fetch field options:', response.status)
+      return
+    }
+
+    const schema = await response.json() as {
+      structure: Array<{
+        slug: string
+        field_type: string
+        params?: {
+          choices?: Array<{ value: string; label: string }>
+        }
+      }>
+    }
+
+    // Build option maps from schema
+    evidenceTypeOptions = new Map()
+    photoStageOptions = new Map()
+
+    for (const field of schema.structure) {
+      if (field.slug === EVIDENCE_FIELDS.evidence_type && field.params?.choices) {
+        for (const choice of field.params.choices) {
+          evidenceTypeOptions.set(choice.value, choice.label)
+        }
+        console.log('[EVIDENCE] Loaded', evidenceTypeOptions.size, 'evidence type options')
+      }
+      
+      if (field.slug === EVIDENCE_FIELDS.photo_stage && field.params?.choices) {
+        for (const choice of field.params.choices) {
+          photoStageOptions.set(choice.value, choice.label)
+        }
+        console.log('[EVIDENCE] Loaded', photoStageOptions.size, 'photo stage options')
+      }
+    }
+
+    optionsCacheTimestamp = Date.now()
+  } catch (error) {
+    console.error('[EVIDENCE] Error fetching field options:', error)
+  }
 }
 
 // Initialize S3 client for R2
@@ -189,27 +253,36 @@ async function verifyTaskOwnership(taskId: string, clerkId: string): Promise<boo
 }
 
 // Helper: Extract single select value from SmartSuite format
-function extractSingleSelectValue(field: unknown): string | null {
+function extractSingleSelectValue(field: unknown, optionMap: Map<string, string> | null): string | null {
   if (!field) return null
   
+  // If it's a string, check if it's an option ID we can look up
   if (typeof field === 'string') {
-    // Check if it looks like a field ID (5-6 char alphanumeric)
-    if (/^[a-zA-Z0-9]{5,6}$/.test(field)) {
-      return null
+    // Try to look up in option map first
+    if (optionMap && optionMap.has(field)) {
+      return optionMap.get(field)!.toLowerCase()
     }
-    return field
+    // If it looks like a readable label (not a 5-char ID), return it
+    if (!/^[a-zA-Z0-9]{5,6}$/.test(field)) {
+      return field.toLowerCase()
+    }
+    return null
   }
   
+  // If it's an object with label/value
   if (typeof field === 'object' && field !== null) {
     const obj = field as Record<string, unknown>
     if (obj.label && typeof obj.label === 'string') {
       return obj.label.toLowerCase()
     }
     if (obj.value && typeof obj.value === 'string') {
-      if (/^[a-zA-Z0-9]{5,6}$/.test(obj.value)) {
-        return null
+      // Try to look up value in option map
+      if (optionMap && optionMap.has(obj.value)) {
+        return optionMap.get(obj.value)!.toLowerCase()
       }
-      return obj.value.toLowerCase()
+      if (!/^[a-zA-Z0-9]{5,6}$/.test(obj.value)) {
+        return obj.value.toLowerCase()
+      }
     }
   }
   
@@ -243,17 +316,11 @@ function transformEvidence(item: Record<string, unknown>): Record<string, unknow
     isSynced = (obj.completed_items as number) > 0
   }
 
-  // DEBUG: Log raw field values from SmartSuite
-  console.log('[EVIDENCE] Raw evidence_type field:', JSON.stringify(item[EVIDENCE_FIELDS.evidence_type]))
-  console.log('[EVIDENCE] Raw photo_stage field:', JSON.stringify(item[EVIDENCE_FIELDS.photo_stage]))
-  console.log('[EVIDENCE] EVIDENCE_FIELDS.evidence_type key:', EVIDENCE_FIELDS.evidence_type)
-  console.log('[EVIDENCE] EVIDENCE_FIELDS.photo_stage key:', EVIDENCE_FIELDS.photo_stage)
-
   return {
     id: item.id,
     taskId: taskId || null,
-    evidenceType: extractSingleSelectValue(item[EVIDENCE_FIELDS.evidence_type]),
-    photoStage: extractSingleSelectValue(item[EVIDENCE_FIELDS.photo_stage]),
+    evidenceType: extractSingleSelectValue(item[EVIDENCE_FIELDS.evidence_type], evidenceTypeOptions),
+    photoStage: extractSingleSelectValue(item[EVIDENCE_FIELDS.photo_stage], photoStageOptions),
     photoUrl: item[EVIDENCE_FIELDS.photo_url] || null,
     photoHash: item[EVIDENCE_FIELDS.photo_hash] || null,
     latitude: item[EVIDENCE_FIELDS.latitude] || null,
@@ -274,6 +341,9 @@ evidence.get('/task/:taskId', async (c) => {
   console.log('[EVIDENCE] GET /task/:taskId called - taskId:', taskId)
 
   try {
+    // Ensure we have field options loaded
+    await fetchFieldOptions()
+
     const isOwner = await verifyTaskOwnership(taskId, auth.userId)
     if (!isOwner) {
       console.error('[EVIDENCE] Ownership check failed')
@@ -317,6 +387,9 @@ evidence.get('/', async (c) => {
   }
 
   try {
+    // Ensure we have field options loaded
+    await fetchFieldOptions()
+
     const isOwner = await verifyTaskOwnership(taskId, auth.userId)
     if (!isOwner) {
       console.error('[EVIDENCE] Ownership check failed')
@@ -428,6 +501,9 @@ evidence.get('/:id', async (c) => {
   console.log('[EVIDENCE] GET /:id called - evidenceId:', evidenceId)
 
   try {
+    // Ensure we have field options loaded
+    await fetchFieldOptions()
+
     const evidenceRecord = await withRetry(() => 
       client.getRecord<Evidence>(TABLES.EVIDENCE, evidenceId)
     )
@@ -573,6 +649,9 @@ evidence.post('/', async (c) => {
     const newEvidence = await withRetry(() => 
       client.createRecord<Evidence>(TABLES.EVIDENCE, evidenceData as Partial<Evidence>)
     )
+
+    // Ensure options are loaded for transform
+    await fetchFieldOptions()
 
     const transformed = transformEvidence(newEvidence as unknown as Record<string, unknown>)
     
