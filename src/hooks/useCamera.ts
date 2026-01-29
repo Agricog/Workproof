@@ -2,7 +2,6 @@
  * WorkProof Camera Hook
  * Access device camera for evidence capture
  */
-
 import { useState, useRef, useCallback, useEffect } from 'react'
 
 interface UseCameraOptions {
@@ -84,7 +83,6 @@ export function useCamera(options: UseCameraOptions = {}): UseCameraReturn {
       }
     } catch (err) {
       const error = err as Error
-
       if (error.name === 'NotAllowedError') {
         setError('Camera permission denied. Please enable in settings.')
       } else if (error.name === 'NotFoundError') {
@@ -94,7 +92,6 @@ export function useCamera(options: UseCameraOptions = {}): UseCameraReturn {
       } else {
         setError('Failed to access camera.')
       }
-
       console.error('Camera error:', error)
     }
   }, [currentFacingMode, resolution, stopCamera])
