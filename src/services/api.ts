@@ -181,6 +181,7 @@ export const evidenceApi = {
   create: async (data: {
     task_id: string
     evidence_type: string
+    photo_stage?: string
     photo_url: string
     photo_hash: string
     latitude?: number | null
