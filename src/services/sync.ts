@@ -130,6 +130,7 @@ async function syncEvidence(token: string): Promise<void> {
         item.taskId,
         {
           evidenceType: item.evidenceType,
+          photoStage: item.photoStage,
           photoData: item.photoData,
           thumbnailData: item.thumbnailData,
           hash: item.hash,
@@ -219,6 +220,7 @@ async function processEvidenceSync(item: SyncQueueItem, token: string): Promise<
   const data = item.data as {
     taskId: string
     evidenceType: string
+    photoStage?: string
     photoData: string
     thumbnailData: string
     hash: string
@@ -232,6 +234,7 @@ async function processEvidenceSync(item: SyncQueueItem, token: string): Promise<
     data.taskId,
     {
       evidenceType: data.evidenceType,
+      photoStage: data.photoStage,
       photoData: data.photoData,
       thumbnailData: data.thumbnailData,
       hash: data.hash,
@@ -316,6 +319,7 @@ export async function forceSyncNow(
           item.taskId,
           {
             evidenceType: item.evidenceType,
+            photoStage: item.photoStage,
             photoData: item.photoData,
             thumbnailData: item.thumbnailData,
             hash: item.hash,
