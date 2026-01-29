@@ -5,8 +5,8 @@
 import { useState } from 'react'
 import { Camera, CheckCircle, Circle, X } from 'lucide-react'
 import { getTaskTypeConfig, getEvidenceLabel } from '../../types/taskConfigs'
-import type { TaskType, EvidenceType, PhotoStage } from '../../types/models'
 import { PHOTO_STAGE_LABELS, PHOTO_STAGE_COLORS } from '../../types/models'
+import type { TaskType, EvidenceType, PhotoStage } from '../../types/models'
 
 interface CapturedEvidenceInfo {
   captured: boolean
@@ -15,7 +15,7 @@ interface CapturedEvidenceInfo {
 
 interface EvidenceChecklistProps {
   taskType: TaskType
-  capturedEvidence: Record<string, CapturedEvidenceInfo | boolean>
+  capturedEvidence: Record<string, CapturedEvidenceInfo>
   onCaptureStart: (evidenceType: EvidenceType, stage: PhotoStage) => void
 }
 
@@ -33,14 +33,12 @@ export default function EvidenceChecklist({
 
   const isComplete = (evidenceType: string): boolean => {
     const evidence = capturedEvidence[evidenceType]
-    if (typeof evidence === 'boolean') return evidence
     return evidence?.captured === true
   }
 
   const getStage = (evidenceType: string): PhotoStage | undefined => {
     const evidence = capturedEvidence[evidenceType]
-    if (typeof evidence === 'object') return evidence.stage
-    return undefined
+    return evidence?.stage
   }
 
   const handleItemClick = (evidenceType: string) => {
@@ -145,7 +143,7 @@ export default function EvidenceChecklist({
         </h2>
 
         <div className="space-y-2">
-          {requiredEvidence.map((evidenceType) => renderEvidenceItem(evidenceType, true))}
+          {requiredEvidence.map((evidenceType) => renderEvidenceItem(evidenceType))}
         </div>
       </div>
 
@@ -158,7 +156,7 @@ export default function EvidenceChecklist({
           </h2>
 
           <div className="space-y-2">
-            {optionalEvidence.map((evidenceType) => renderEvidenceItem(evidenceType, false))}
+            {optionalEvidence.map((evidenceType) => renderEvidenceItem(evidenceType))}
           </div>
         </div>
       )}
