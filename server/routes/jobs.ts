@@ -26,6 +26,17 @@ function userOwnsJob(job: Record<string, unknown>, userRecordId: string): boolea
   return userIds.includes(userRecordId)
 }
 
+// Helper: Extract status value from SmartSuite format (handles both string and object)
+function getJobStatus(job: Record<string, unknown>): string {
+  const statusRaw = job[JOB_FIELDS.status]
+  if (!statusRaw) return 'active'
+  if (typeof statusRaw === 'string') return statusRaw
+  if (typeof statusRaw === 'object' && statusRaw !== null && 'value' in statusRaw) {
+    return (statusRaw as { value: string }).value
+  }
+  return 'active'
+}
+
 // Helper: Transform SmartSuite job record to readable format
 function transformJob(record: Record<string, unknown>): Record<string, unknown> {
   // Handle date field - may be object with date property
@@ -47,7 +58,7 @@ function transformJob(record: Record<string, unknown>): Record<string, unknown> 
     postcode: record[JOB_FIELDS.postcode] || '',
     clientPhone: record[JOB_FIELDS.client_phone],
     clientEmail: record[JOB_FIELDS.client_email],
-    status: record[JOB_FIELDS.status] || 'active',
+    status: getJobStatus(record),
     startDate: startDate,
     completionDate: record[JOB_FIELDS.completion_date],
     notes: record[JOB_FIELDS.notes],
@@ -62,6 +73,7 @@ jobs.get('/', async (c) => {
 
   try {
     const userRecordId = await getUserRecordId(auth.userId)
+
     if (!userRecordId) {
       return c.json({ error: 'User not found' }, 404)
     }
@@ -83,7 +95,7 @@ jobs.get('/', async (c) => {
     // Exclude archived jobs by default (unless specifically requested)
     if (status !== 'archived') {
       filteredItems = filteredItems.filter(item => {
-        const jobStatus = (item as unknown as Record<string, unknown>)[JOB_FIELDS.status]
+        const jobStatus = getJobStatus(item as unknown as Record<string, unknown>)
         return jobStatus !== 'archived'
       })
     }
@@ -91,7 +103,7 @@ jobs.get('/', async (c) => {
     // Apply status filter if provided
     if (status) {
       filteredItems = filteredItems.filter(item => {
-        const jobStatus = (item as unknown as Record<string, unknown>)[JOB_FIELDS.status]
+        const jobStatus = getJobStatus(item as unknown as Record<string, unknown>)
         return jobStatus === status
       })
     }
@@ -100,9 +112,11 @@ jobs.get('/', async (c) => {
     filteredItems.sort((a, b) => {
       const aRaw = (a as unknown as Record<string, unknown>)[JOB_FIELDS.created_at]
       const bRaw = (b as unknown as Record<string, unknown>)[JOB_FIELDS.created_at]
+
       // Handle both string and object date formats
       const aDate = typeof aRaw === 'string' ? aRaw : (aRaw as { date?: string })?.date || ''
       const bDate = typeof bRaw === 'string' ? bRaw : (bRaw as { date?: string })?.date || ''
+
       return String(bDate).localeCompare(String(aDate))
     })
 
@@ -155,6 +169,7 @@ jobs.post('/', async (c) => {
 
   try {
     const userRecordId = await getUserRecordId(auth.userId)
+
     if (!userRecordId) {
       return c.json({ error: 'User not found' }, 404)
     }
@@ -176,6 +191,7 @@ jobs.post('/', async (c) => {
     if (!address) {
       return c.json({ error: 'Missing required field: address' }, 400)
     }
+
     if (!clientName) {
       return c.json({ error: 'Missing required field: client_name' }, 400)
     }
