@@ -52,7 +52,7 @@ export default function Settings() {
   const handleSync = async () => {
     setIsSyncing(true)
     try {
-      const result = await forceSyncNow(getToken)
+      const result = await forceSyncNow()
       await loadSyncStatus()
       if (result.synced > 0) {
         trackEvidenceSynced(result.synced)
