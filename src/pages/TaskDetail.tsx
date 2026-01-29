@@ -10,7 +10,7 @@ import { ArrowLeft, AlertCircle, RefreshCw } from 'lucide-react'
 import { getTaskTypeConfig } from '../types/taskConfigs'
 import { trackTaskStarted, trackTaskCompleted, trackError } from '../utils/analytics'
 import { captureError } from '../utils/errorTracking'
-import { tasksApi, evidenceApi } from '../services/api'
+import { tasksApi } from '../services/api'
 import type { Task, TaskStatus, EvidenceType, PhotoStage } from '../types/models'
 import type { StoredEvidence } from '../utils/indexedDB'
 import PhotoCapture from '../components/capture/PhotoCapture'
@@ -49,45 +49,45 @@ export default function TaskDetail() {
   }, [taskId])
 
   const loadTaskData = async () => {
-  if (!taskId) return
+    if (!taskId) return
 
-  setIsLoading(true)
-  setError(null)
+    setIsLoading(true)
+    setError(null)
 
-  try {
-    const token = await getToken()
+    try {
+      const token = await getToken()
 
-    // Single API call for task + evidence
-    const response = await tasksApi.getWithEvidence(taskId, token)
+      // Single API call for task + evidence
+      const response = await tasksApi.getWithEvidence(taskId, token)
 
-    if (response.error) {
-      setError(response.error)
-      trackError('api_error', 'task_detail_load')
-      return
-    }
+      if (response.error) {
+        setError(response.error)
+        trackError('api_error', 'task_detail_load')
+        return
+      }
 
-    if (response.data) {
-      setTask(response.data.task)
+      if (response.data) {
+        setTask(response.data.task)
 
-      const captured: Record<string, CapturedEvidenceInfo> = {}
-      response.data.evidence.items.forEach((ev) => {
-        if (ev.evidenceType) {
-          const normalizedType = ev.evidenceType.toLowerCase().replace(/\s+/g, '_')
-          captured[normalizedType] = {
-            captured: true,
-            stage: ev.photoStage as PhotoStage
+        const captured: Record<string, CapturedEvidenceInfo> = {}
+        response.data.evidence.items.forEach((ev: { evidenceType?: string; photoStage?: string }) => {
+          if (ev.evidenceType) {
+            const normalizedType = ev.evidenceType.toLowerCase().replace(/\s+/g, '_')
+            captured[normalizedType] = {
+              captured: true,
+              stage: ev.photoStage as PhotoStage
+            }
           }
-        }
-      })
-      setCapturedEvidence(captured)
+        })
+        setCapturedEvidence(captured)
+      }
+    } catch (err) {
+      setError('Failed to load task details. Please try again.')
+      captureError(err, 'TaskDetail.loadTaskData')
+    } finally {
+      setIsLoading(false)
     }
-  } catch (err) {
-    setError('Failed to load task details. Please try again.')
-    captureError(err, 'TaskDetail.loadTaskData')
-  } finally {
-    setIsLoading(false)
   }
-}
 
   const handleCaptureStart = async (evidenceType: EvidenceType, stage: PhotoStage) => {
     setSelectedEvidenceType(evidenceType)
