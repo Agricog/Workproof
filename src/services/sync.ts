@@ -180,16 +180,32 @@ async function processQueue(): Promise<void> {
  * Process evidence sync item
  */
 async function processEvidenceSync(item: SyncQueueItem): Promise<boolean> {
-  const response = await evidenceApi.upload(item.entityId, {
-    evidenceType: item.data.evidenceType,
-    photoStage: item.data.photoStage || undefined,  // NEW: Include photo stage
-    photoData: item.data.photoData,
-    thumbnailData: item.data.thumbnailData,
-    hash: item.data.hash,
-    capturedAt: item.data.capturedAt,
-    latitude: item.data.latitude,
-    longitude: item.data.longitude,
-    accuracy: item.data.accuracy,
+  // Cast item data to expected shape
+  const data = item as unknown as {
+    entityId: string
+    data: {
+      evidenceType: string
+      photoStage?: string
+      photoData: string
+      thumbnailData: string
+      hash: string
+      capturedAt: string
+      latitude: number | null
+      longitude: number | null
+      accuracy: number | null
+    }
+  }
+  
+  const response = await evidenceApi.upload(data.entityId, {
+    evidenceType: data.data.evidenceType,
+    photoStage: data.data.photoStage,
+    photoData: data.data.photoData,
+    thumbnailData: data.data.thumbnailData,
+    hash: data.data.hash,
+    capturedAt: data.data.capturedAt,
+    latitude: data.data.latitude,
+    longitude: data.data.longitude,
+    accuracy: data.data.accuracy,
   })
 
   return !!response.data && !response.error
