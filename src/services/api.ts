@@ -164,7 +164,7 @@ export const tasksApi = {
 // Evidence API
 export const evidenceApi = {
   listByTask: async (taskId: string, token?: string | null): Promise<ApiResponse<Evidence[]>> => {
-    return apiRequest<Evidence[]>(`/api/evidence?task_id=${taskId}`, {}, token)
+    return apiRequest<Evidence[]>(`/api/evidence/task/${taskId}`, {}, token)
   },
 
   getUploadUrl: async (
