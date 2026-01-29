@@ -35,6 +35,7 @@ export default function TaskDetail() {
   const taskId = params.taskId
   const navigate = useNavigate()
   const { getToken } = useAuth()
+
   const [task, setTask] = useState<Task | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -58,6 +59,7 @@ export default function TaskDetail() {
 
       // Fetch task details
       const taskResponse = await tasksApi.get(taskId, token)
+
       if (taskResponse.error) {
         setError(taskResponse.error)
         trackError('api_error', 'task_detail_load')
@@ -69,6 +71,7 @@ export default function TaskDetail() {
 
         // Fetch existing evidence for this task
         const evidenceResponse = await evidenceApi.listByTask(taskId, token)
+
         if (evidenceResponse.data) {
           // Mark captured evidence types with their stages
           const captured: Record<string, CapturedEvidenceInfo> = {}
@@ -283,11 +286,6 @@ export default function TaskDetail() {
             </div>
             <span className="text-sm font-medium text-gray-700">
               {Object.keys(capturedEvidence).length}/{config.requiredEvidence.length}
-            </span>
-          </div>
-        </div>
-            <span className="text-sm font-medium text-gray-700">
-              {task.evidenceCount || 0}/{task.requiredEvidenceCount || 0}
             </span>
           </div>
         </div>
