@@ -288,6 +288,7 @@ function transformEvidence(item: Record<string, unknown>): Record<string, unknow
     photoStage: extractSingleSelectValue(item[EVIDENCE_FIELDS.photo_stage], PHOTO_STAGE_OPTIONS),
     photoUrl: item[EVIDENCE_FIELDS.photo_url] || null,
     photoHash: item[EVIDENCE_FIELDS.photo_hash] || null,
+    notes: item[EVIDENCE_FIELDS.notes] || null,
     latitude: item[EVIDENCE_FIELDS.latitude] || null,
     longitude: item[EVIDENCE_FIELDS.longitude] || null,
     gpsAccuracy: item[EVIDENCE_FIELDS.gps_accuracy] || null,
@@ -550,6 +551,7 @@ evidence.post('/', async (c) => {
     const taskId = (body.task_id || body.taskId) as string
     const evidenceTypeRaw = (body.evidence_type || body.evidenceType) as string
     const photoStageRaw = (body.photo_stage || body.photoStage) as string | undefined
+    const notes = (body.notes as string | undefined)?.trim() || null
     const photoUrl = (body.photo_url || body.photoUrl) as string
     const photoHash = (body.photo_hash || body.photoHash) as string
 
@@ -557,7 +559,7 @@ evidence.post('/', async (c) => {
     const evidenceType = EVIDENCE_TYPE_MAP[evidenceTypeRaw] || evidenceTypeRaw
     const photoStage = photoStageRaw ? (PHOTO_STAGE_MAP[photoStageRaw.toLowerCase()] || photoStageRaw) : undefined
 
-    console.log('[EVIDENCE] Parsed fields:', { taskId, evidenceTypeRaw, evidenceType, photoStageRaw, photoStage, photoUrl: photoUrl?.slice(0, 50) })
+    console.log('[EVIDENCE] Parsed fields:', { taskId, evidenceTypeRaw, evidenceType, photoStageRaw, photoStage, notes, photoUrl: photoUrl?.slice(0, 50) })
 
     // Validate required fields
     if (!taskId || !evidenceTypeRaw || !photoUrl) {
@@ -587,6 +589,12 @@ evidence.post('/', async (c) => {
     if (photoStage) {
       evidenceData[EVIDENCE_FIELDS.photo_stage] = photoStage
       console.log('[EVIDENCE] Adding photo_stage:', photoStage)
+    }
+
+    // Add notes if provided
+    if (notes) {
+      evidenceData[EVIDENCE_FIELDS.notes] = notes
+      console.log('[EVIDENCE] Adding notes:', notes.slice(0, 50) + (notes.length > 50 ? '...' : ''))
     }
 
     // Add optional GPS fields
