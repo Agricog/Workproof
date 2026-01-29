@@ -57,48 +57,33 @@ export default function TaskDetail() {
   try {
     const token = await getToken()
 
-    // Fetch task and evidence in PARALLEL
-    const [taskResponse, evidenceResponse] = await Promise.all([
-      tasksApi.get(taskId, token),
-      evidenceApi.listByTask(taskId, token)
-    ])
+    // Single API call for task + evidence
+    const response = await tasksApi.getWithEvidence(taskId, token)
 
-    if (taskResponse.error) {
-      setError(taskResponse.error)
+    if (response.error) {
+      setError(response.error)
       trackError('api_error', 'task_detail_load')
       return
     }
 
-    if (taskResponse.data) {
-      setTask(taskResponse.data)
+    if (response.data) {
+      setTask(response.data.task)
 
-      console.log('[TaskDetail] Evidence response:', JSON.stringify(evidenceResponse, null, 2))
-
-      if (evidenceResponse.data) {
-        const captured: Record<string, CapturedEvidenceInfo> = {}
-        const evidenceList = Array.isArray(evidenceResponse.data) 
-          ? evidenceResponse.data 
-          : (evidenceResponse.data as unknown as { items: Array<Record<string, unknown>> }).items || []
-        
-        ;(evidenceList as Array<Record<string, unknown>>).forEach((ev) => {
-          const evType = (ev.evidenceType || ev.evidence_type) as string | undefined
-          const evStage = (ev.photoStage || ev.photo_stage) as PhotoStage | undefined
-          if (evType) {
-            const normalizedType = evType.toLowerCase().replace(/\s+/g, '_')
-            captured[normalizedType] = {
-              captured: true,
-              stage: evStage
-            }
+      const captured: Record<string, CapturedEvidenceInfo> = {}
+      response.data.evidence.items.forEach((ev) => {
+        if (ev.evidenceType) {
+          const normalizedType = ev.evidenceType.toLowerCase().replace(/\s+/g, '_')
+          captured[normalizedType] = {
+            captured: true,
+            stage: ev.photoStage as PhotoStage
           }
-        })
-        setCapturedEvidence(captured)
-      }
+        }
+      })
+      setCapturedEvidence(captured)
     }
   } catch (err) {
-    const errorMessage = 'Failed to load task details. Please try again.'
-    setError(errorMessage)
+    setError('Failed to load task details. Please try again.')
     captureError(err, 'TaskDetail.loadTaskData')
-    trackError(err instanceof Error ? err.name : 'unknown', 'task_detail_load')
   } finally {
     setIsLoading(false)
   }
