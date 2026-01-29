@@ -49,64 +49,60 @@ export default function TaskDetail() {
   }, [taskId])
 
   const loadTaskData = async () => {
-    if (!taskId) return
+  if (!taskId) return
 
-    setIsLoading(true)
-    setError(null)
+  setIsLoading(true)
+  setError(null)
 
-    try {
-      const token = await getToken()
+  try {
+    const token = await getToken()
 
-      // Fetch task details
-      const taskResponse = await tasksApi.get(taskId, token)
+    // Fetch task and evidence in PARALLEL
+    const [taskResponse, evidenceResponse] = await Promise.all([
+      tasksApi.get(taskId, token),
+      evidenceApi.listByTask(taskId, token)
+    ])
 
-      if (taskResponse.error) {
-        setError(taskResponse.error)
-        trackError('api_error', 'task_detail_load')
-        return
-      }
+    if (taskResponse.error) {
+      setError(taskResponse.error)
+      trackError('api_error', 'task_detail_load')
+      return
+    }
 
-      if (taskResponse.data) {
-        setTask(taskResponse.data)
+    if (taskResponse.data) {
+      setTask(taskResponse.data)
 
-        // Fetch existing evidence for this task
-        const evidenceResponse = await evidenceApi.listByTask(taskId, token)
+      console.log('[TaskDetail] Evidence response:', JSON.stringify(evidenceResponse, null, 2))
+
+      if (evidenceResponse.data) {
+        const captured: Record<string, CapturedEvidenceInfo> = {}
+        const evidenceList = Array.isArray(evidenceResponse.data) 
+          ? evidenceResponse.data 
+          : (evidenceResponse.data as unknown as { items: Array<Record<string, unknown>> }).items || []
         
-        // DEBUG: Log what we're getting
-        console.log('[TaskDetail] Evidence response:', JSON.stringify(evidenceResponse, null, 2))
-
-        if (evidenceResponse.data) {
-          // Mark captured evidence types with their stages
-          const captured: Record<string, CapturedEvidenceInfo> = {}
-          // Handle both array and { items: [] } response formats
-          const evidenceList = Array.isArray(evidenceResponse.data) 
-            ? evidenceResponse.data 
-            : (evidenceResponse.data as unknown as { items: Array<Record<string, unknown>> }).items || []
-          ;(evidenceList as Array<Record<string, unknown>>).forEach((ev) => {
-            // Handle both camelCase and snake_case from API
-            const evType = (ev.evidenceType || ev.evidence_type) as string | undefined
-const evStage = (ev.photoStage || ev.photo_stage) as PhotoStage | undefined
-if (evType) {
-  // Normalize to snake_case for matching with config
-  const normalizedType = evType.toLowerCase().replace(/\s+/g, '_')
-  captured[normalizedType] = {
-    captured: true,
-    stage: evStage
+        ;(evidenceList as Array<Record<string, unknown>>).forEach((ev) => {
+          const evType = (ev.evidenceType || ev.evidence_type) as string | undefined
+          const evStage = (ev.photoStage || ev.photo_stage) as PhotoStage | undefined
+          if (evType) {
+            const normalizedType = evType.toLowerCase().replace(/\s+/g, '_')
+            captured[normalizedType] = {
+              captured: true,
+              stage: evStage
+            }
+          }
+        })
+        setCapturedEvidence(captured)
+      }
+    }
+  } catch (err) {
+    const errorMessage = 'Failed to load task details. Please try again.'
+    setError(errorMessage)
+    captureError(err, 'TaskDetail.loadTaskData')
+    trackError(err instanceof Error ? err.name : 'unknown', 'task_detail_load')
+  } finally {
+    setIsLoading(false)
   }
 }
-          })
-          setCapturedEvidence(captured)
-        }
-      }
-    } catch (err) {
-      const errorMessage = 'Failed to load task details. Please try again.'
-      setError(errorMessage)
-      captureError(err, 'TaskDetail.loadTaskData')
-      trackError(err instanceof Error ? err.name : 'unknown', 'task_detail_load')
-    } finally {
-      setIsLoading(false)
-    }
-  }
 
   const handleCaptureStart = async (evidenceType: EvidenceType, stage: PhotoStage) => {
     setSelectedEvidenceType(evidenceType)
