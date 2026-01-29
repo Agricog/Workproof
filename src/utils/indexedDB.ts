@@ -12,6 +12,7 @@ export interface StoredEvidence {
   taskId: string
   jobId: string
   evidenceType: string
+  photoStage: string | null
   photoData: string
   thumbnailData: string
   hash: string
