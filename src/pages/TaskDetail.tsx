@@ -69,10 +69,14 @@ export default function TaskDetail() {
 
         // Fetch existing evidence for this task
         const evidenceResponse = await evidenceApi.listByTask(taskId, token)
-        if (evidenceResponse.data?.items) {
+        if (evidenceResponse.data) {
           // Mark captured evidence types with their stages
           const captured: Record<string, CapturedEvidenceInfo> = {}
-          evidenceResponse.data.items.forEach((ev) => {
+          // Handle both array and { items: [] } response formats
+          const evidenceList = Array.isArray(evidenceResponse.data) 
+            ? evidenceResponse.data 
+            : (evidenceResponse.data as unknown as { items: Array<{ evidenceType?: string; photoStage?: string }> }).items || []
+          evidenceList.forEach((ev) => {
             if (ev.evidenceType) {
               captured[ev.evidenceType] = {
                 captured: true,
