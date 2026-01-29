@@ -57,8 +57,8 @@ export default function EvidenceChecklist({
     setSelectingStageFor(null)
   }
 
-  const renderEvidenceItem = (evidenceType: string, isRequired: boolean) => {
-    const label = getEvidenceLabel(evidenceType)
+  const renderEvidenceItem = (evidenceType: string) => {
+    const label = getEvidenceLabel(evidenceType as EvidenceType)
     const completed = isComplete(evidenceType)
     const stage = getStage(evidenceType)
     const isSelectingStage = selectingStageFor === evidenceType
