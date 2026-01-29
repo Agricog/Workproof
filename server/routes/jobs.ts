@@ -80,6 +80,14 @@ jobs.get('/', async (c) => {
       userOwnsJob(item as unknown as Record<string, unknown>, userRecordId)
     )
 
+    // Exclude archived jobs by default (unless specifically requested)
+    if (status !== 'archived') {
+      filteredItems = filteredItems.filter(item => {
+        const jobStatus = (item as unknown as Record<string, unknown>)[JOB_FIELDS.status]
+        return jobStatus !== 'archived'
+      })
+    }
+
     // Apply status filter if provided
     if (status) {
       filteredItems = filteredItems.filter(item => {
