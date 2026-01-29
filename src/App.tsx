@@ -16,6 +16,7 @@ const AuditPacks = lazy(() => import('./pages/AuditPacks'))
 const Packs = lazy(() => import('./pages/Packs'))
 const PackPreview = lazy(() => import('./pages/PackPreview'))
 const Settings = lazy(() => import('./pages/Settings'))
+const AddTasks = lazy(() => import('./pages/AddTasks'))
 
 // Loading spinner
 function LoadingSpinner() {
