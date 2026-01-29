@@ -164,7 +164,7 @@ export const tasksApi = {
 // Evidence API
 export const evidenceApi = {
   listByTask: async (taskId: string, token?: string | null): Promise<ApiResponse<Evidence[]>> => {
-    return apiRequest<Evidence[]>(`/api/evidence/task/${taskId}`, {}, token)
+    return apiRequest<Evidence[]>(`/api/evidence?task_id=${taskId}`, {}, token)
   },
 
   getUploadUrl: async (
@@ -181,7 +181,6 @@ export const evidenceApi = {
   create: async (data: {
     task_id: string
     evidence_type: string
-    photo_stage?: string
     photo_url: string
     photo_hash: string
     latitude?: number | null
@@ -209,7 +208,6 @@ export const evidenceApi = {
     taskId: string,
     data: {
       evidenceType: string
-      photoStage?: string
       photoData: string
       thumbnailData: string
       hash: string
@@ -258,7 +256,6 @@ export const evidenceApi = {
       return evidenceApi.create({
         task_id: taskId,
         evidence_type: data.evidenceType,
-        photo_stage: data.photoStage,
         photo_url: uploadUrlResult.data.photo_url,
         photo_hash: photoHash,
         latitude: data.latitude,
