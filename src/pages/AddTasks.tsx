@@ -13,7 +13,8 @@ import {
   AlertCircle,
   Loader2,
 } from 'lucide-react'
-import { TASK_TYPE_CONFIGS, type TaskType } from '../types/taskConfigs'
+import { TASK_TYPE_CONFIGS } from '../types/taskConfigs'
+import type { TaskType } from '../types/models'
 import { trackPageView, trackEvent } from '../utils/analytics'
 import { captureError } from '../utils/errorTracking'
 import { jobsApi, tasksApi } from '../services/api'
@@ -121,15 +122,15 @@ export default function AddTasks() {
     }
   }
 
-  // Group task types by category
-  const groupedTaskTypes = Object.entries(TASK_TYPE_CONFIGS).reduce((acc, [key, config]) => {
-    const category = config.category || 'Other'
-    if (!acc[category]) {
-      acc[category] = []
-    }
-    acc[category].push({ key: key as TaskType, config })
-    return acc
-  }, {} as Record<string, Array<{ key: TaskType; config: typeof TASK_TYPE_CONFIGS[TaskType] }>>)
+  // Get all task types as entries
+  const allTaskTypes = Object.entries(TASK_TYPE_CONFIGS) as [TaskType, typeof TASK_TYPE_CONFIGS[TaskType]][]
+
+  // Filter out already existing tasks
+  const availableTaskTypes = allTaskTypes.filter(([key]) => !existingTaskTypes.has(key))
+
+  // Group by Part P notifiable vs not
+  const partPTasks = availableTaskTypes.filter(([, config]) => config.partPNotifiable)
+  const otherTasks = availableTaskTypes.filter(([, config]) => !config.partPNotifiable)
 
   if (isLoading) {
     return (
@@ -159,8 +160,6 @@ export default function AddTasks() {
       </div>
     )
   }
-
-  const availableCount = Object.keys(TASK_TYPE_CONFIGS).length - existingTaskTypes.size
 
   return (
     <div>
@@ -195,72 +194,117 @@ export default function AddTasks() {
 
         {/* Info */}
         <p className="text-sm text-gray-600 mb-4">
-          Select the task types to add to this job. {availableCount} task types available.
+          Select the task types to add to this job. {availableTaskTypes.length} task types available.
         </p>
 
         {/* Task Type Selection */}
         <div className="space-y-6 mb-24">
-          {Object.entries(groupedTaskTypes).map(([category, tasks]) => {
-            const availableTasks = tasks.filter(t => !existingTaskTypes.has(t.key))
-            if (availableTasks.length === 0) return null
-
-            return (
-              <div key={category}>
-                <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-                  {category}
-                </h2>
-                <div className="space-y-2">
-                  {availableTasks.map(({ key, config }) => {
-                    const isSelected = selectedTypes.has(key)
-                    
-                    return (
-                      <button
-                        key={key}
-                        onClick={() => toggleTaskType(key)}
-                        className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
-                          isSelected
-                            ? 'border-green-500 bg-green-50'
-                            : 'border-gray-200 bg-white hover:border-gray-300'
-                        }`}
-                        aria-pressed={isSelected}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium text-gray-900">
-                                {config.label}
-                              </span>
-                              {config.partPNotifiable && (
-                                <span className="badge badge-warning text-xs">Part P</span>
-                              )}
-                            </div>
-                            <p className="text-sm text-gray-500 mt-1">
-                              {config.requiredEvidence.length} required photos
-                              {config.optionalEvidence.length > 0 && 
-                                ` + ${config.optionalEvidence.length} optional`}
-                            </p>
+          {/* Part P Notifiable Tasks */}
+          {partPTasks.length > 0 && (
+            <div>
+              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                Part P Notifiable
+              </h2>
+              <div className="space-y-2">
+                {partPTasks.map(([key, config]) => {
+                  const isSelected = selectedTypes.has(key)
+                  
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => toggleTaskType(key)}
+                      className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
+                        isSelected
+                          ? 'border-green-500 bg-green-50'
+                          : 'border-gray-200 bg-white hover:border-gray-300'
+                      }`}
+                      aria-pressed={isSelected}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-gray-900">
+                              {config.label}
+                            </span>
+                            <span className="badge badge-warning text-xs">Part P</span>
                           </div>
-                          <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
-                            isSelected
-                              ? 'bg-green-500 text-white'
-                              : 'bg-gray-100 text-gray-400'
-                          }`}>
-                            {isSelected ? (
-                              <Check className="w-4 h-4" />
-                            ) : (
-                              <Plus className="w-4 h-4" />
-                            )}
-                          </div>
+                          <p className="text-sm text-gray-500 mt-1">
+                            {config.requiredEvidence.length} required photos
+                            {config.optionalEvidence.length > 0 && 
+                              ` + ${config.optionalEvidence.length} optional`}
+                          </p>
                         </div>
-                      </button>
-                    )
-                  })}
-                </div>
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+                          isSelected
+                            ? 'bg-green-500 text-white'
+                            : 'bg-gray-100 text-gray-400'
+                        }`}>
+                          {isSelected ? (
+                            <Check className="w-4 h-4" />
+                          ) : (
+                            <Plus className="w-4 h-4" />
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
               </div>
-            )
-          })}
+            </div>
+          )}
 
-          {availableCount === 0 && (
+          {/* Other Tasks */}
+          {otherTasks.length > 0 && (
+            <div>
+              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                Other Tasks
+              </h2>
+              <div className="space-y-2">
+                {otherTasks.map(([key, config]) => {
+                  const isSelected = selectedTypes.has(key)
+                  
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => toggleTaskType(key)}
+                      className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
+                        isSelected
+                          ? 'border-green-500 bg-green-50'
+                          : 'border-gray-200 bg-white hover:border-gray-300'
+                      }`}
+                      aria-pressed={isSelected}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <span className="font-medium text-gray-900">
+                            {config.label}
+                          </span>
+                          <p className="text-sm text-gray-500 mt-1">
+                            {config.requiredEvidence.length} required photos
+                            {config.optionalEvidence.length > 0 && 
+                              ` + ${config.optionalEvidence.length} optional`}
+                          </p>
+                        </div>
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+                          isSelected
+                            ? 'bg-green-500 text-white'
+                            : 'bg-gray-100 text-gray-400'
+                        }`}>
+                          {isSelected ? (
+                            <Check className="w-4 h-4" />
+                          ) : (
+                            <Plus className="w-4 h-4" />
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {availableTaskTypes.length === 0 && (
             <div className="text-center py-8">
               <Check className="w-12 h-12 text-green-500 mx-auto mb-3" />
               <p className="text-gray-600">All task types have been added to this job.</p>
