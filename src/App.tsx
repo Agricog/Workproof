@@ -32,7 +32,7 @@ function SyncServiceInit() {
 
   useEffect(() => {
     // Start sync service with token getter
-    startSyncService()
+    startSyncService(getToken)
     return () => {
       stopSyncService()
     }
