@@ -251,7 +251,7 @@ export default function PhotoCapture({
           <div className="flex items-center gap-1">
             <MapPin className={`w-4 h-4 ${location ? 'text-green-400' : 'text-gray-400'}`} />
             <span className={location ? 'text-green-400' : 'text-gray-400'}>
-              {geoLoading ? 'Getting location...' : location ? 'GPS locked' : geoError || 'No GPS'}
+              {geoLoading ? 'Getting location...' : location ? 'GPS locked' : (typeof geoError === 'string' ? geoError : 'No GPS')}
             </span>
           </div>
           <div className="flex items-center gap-1 text-gray-400">
