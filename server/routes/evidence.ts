@@ -243,6 +243,12 @@ function transformEvidence(item: Record<string, unknown>): Record<string, unknow
     isSynced = (obj.completed_items as number) > 0
   }
 
+  // DEBUG: Log raw field values from SmartSuite
+  console.log('[EVIDENCE] Raw evidence_type field:', JSON.stringify(item[EVIDENCE_FIELDS.evidence_type]))
+  console.log('[EVIDENCE] Raw photo_stage field:', JSON.stringify(item[EVIDENCE_FIELDS.photo_stage]))
+  console.log('[EVIDENCE] EVIDENCE_FIELDS.evidence_type key:', EVIDENCE_FIELDS.evidence_type)
+  console.log('[EVIDENCE] EVIDENCE_FIELDS.photo_stage key:', EVIDENCE_FIELDS.photo_stage)
+
   return {
     id: item.id,
     taskId: taskId || null,
