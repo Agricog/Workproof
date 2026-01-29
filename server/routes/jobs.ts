@@ -1,9 +1,9 @@
 import { Hono } from 'hono'
 import { getSmartSuiteClient, TABLES } from '../lib/smartsuite.js'
-import { USER_FIELDS, JOB_FIELDS } from '../lib/smartsuite-fields.js'
+import { USER_FIELDS, JOB_FIELDS, TASK_FIELDS, EVIDENCE_FIELDS } from '../lib/smartsuite-fields.js'
 import { authMiddleware, getAuth } from '../middleware/auth.js'
 import { rateLimitMiddleware } from '../middleware/rateLimit.js'
-import type { Job, User } from '../types/index.js'
+import type { Job, Task, Evidence, User } from '../types/index.js'
 
 const jobs = new Hono()
 
@@ -26,8 +26,32 @@ function userOwnsJob(job: Record<string, unknown>, userRecordId: string): boolea
   return userIds.includes(userRecordId)
 }
 
+// Helper: Get task IDs for a job
+function getTasksForJob(tasks: Task[], jobId: string): Task[] {
+  return tasks.filter(task => {
+    const taskJobIds = (task as unknown as Record<string, unknown>)[TASK_FIELDS.job] as string[] | string | undefined
+    if (!taskJobIds) return false
+    const jobIds = Array.isArray(taskJobIds) ? taskJobIds : [taskJobIds]
+    return jobIds.includes(jobId)
+  })
+}
+
+// Helper: Get evidence count for tasks
+function getEvidenceCountForTasks(evidence: Evidence[], taskIds: string[]): number {
+  return evidence.filter(ev => {
+    const evTaskIds = (ev as unknown as Record<string, unknown>)[EVIDENCE_FIELDS.task] as string[] | string | undefined
+    if (!evTaskIds) return false
+    const ids = Array.isArray(evTaskIds) ? evTaskIds : [evTaskIds]
+    return ids.some(id => taskIds.includes(id))
+  }).length
+}
+
 // Helper: Transform SmartSuite job record to readable format
-function transformJob(record: Record<string, unknown>): Record<string, unknown> {
+function transformJob(
+  record: Record<string, unknown>,
+  taskCount: number = 0,
+  evidenceCount: number = 0
+): Record<string, unknown> {
   // Handle date field - may be object with date property
   const startDateRaw = record[JOB_FIELDS.start_date]
   let startDate: string
@@ -43,9 +67,13 @@ function transformJob(record: Record<string, unknown>): Record<string, unknown> 
   const statusRaw = record[JOB_FIELDS.status]
   let status = 'active'
   if (typeof statusRaw === 'string') {
-    status = statusRaw
+    // Check if it's a known status or a SmartSuite ID
+    const knownStatuses = ['draft', 'active', 'in_progress', 'completed', 'archived']
+    if (knownStatuses.includes(statusRaw.toLowerCase())) {
+      status = statusRaw.toLowerCase()
+    }
   } else if (statusRaw && typeof statusRaw === 'object' && 'label' in statusRaw) {
-    status = (statusRaw as { label: string }).label.toLowerCase()
+    status = (statusRaw as { label: string }).label.toLowerCase().replace(/\s+/g, '_')
   }
 
   return {
@@ -60,7 +88,9 @@ function transformJob(record: Record<string, unknown>): Record<string, unknown> 
     startDate: startDate,
     completionDate: record[JOB_FIELDS.completion_date],
     notes: record[JOB_FIELDS.notes],
-    createdAt: record[JOB_FIELDS.created_at]
+    createdAt: record[JOB_FIELDS.created_at],
+    taskCount: taskCount,
+    evidenceCount: evidenceCount
   }
 }
 
@@ -71,7 +101,6 @@ jobs.get('/', async (c) => {
 
   try {
     const userRecordId = await getUserRecordId(auth.userId)
-
     if (!userRecordId) {
       return c.json({ error: 'User not found' }, 404)
     }
@@ -79,45 +108,55 @@ jobs.get('/', async (c) => {
     // Get query params for filtering
     const status = c.req.query('status')
 
-    // Fetch all jobs (SmartSuite linked record fields don't support comparison operators)
-    // Then filter in memory
-    const result = await client.listRecords<Job>(TABLES.JOBS, {
-      limit: 100
-    })
+    // Fetch jobs, tasks, and evidence in parallel for efficiency
+    const [jobsResult, tasksResult, evidenceResult] = await Promise.all([
+      client.listRecords<Job>(TABLES.JOBS, { limit: 100 }),
+      client.listRecords<Task>(TABLES.TASKS, { limit: 500 }),
+      client.listRecords<Evidence>(TABLES.EVIDENCE, { limit: 1000 })
+    ])
 
-    // Filter by user ownership in memory
-    let filteredItems = result.items.filter(item => 
+    // Filter jobs by user ownership
+    let filteredJobs = jobsResult.items.filter(item => 
       userOwnsJob(item as unknown as Record<string, unknown>, userRecordId)
     )
 
     // Apply status filter if provided
     if (status) {
-      filteredItems = filteredItems.filter(item => {
+      filteredJobs = filteredJobs.filter(item => {
         const jobRecord = item as unknown as Record<string, unknown>
         const statusRaw = jobRecord[JOB_FIELDS.status]
         if (typeof statusRaw === 'string') {
           return statusRaw === status
+        } else if (statusRaw && typeof statusRaw === 'object' && 'label' in statusRaw) {
+          return (statusRaw as { label: string }).label.toLowerCase() === status
         }
         return false
       })
     }
 
     // Sort by created_at descending
-    filteredItems.sort((a, b) => {
+    filteredJobs.sort((a, b) => {
       const aRaw = (a as unknown as Record<string, unknown>)[JOB_FIELDS.created_at]
       const bRaw = (b as unknown as Record<string, unknown>)[JOB_FIELDS.created_at]
-
-      // Handle both string and object date formats
       const aDate = typeof aRaw === 'string' ? aRaw : (aRaw as { date?: string })?.date || ''
       const bDate = typeof bRaw === 'string' ? bRaw : (bRaw as { date?: string })?.date || ''
-
       return String(bDate).localeCompare(String(aDate))
     })
 
-    // Transform each job to readable format
-    const transformedItems = filteredItems.map(item => 
-      transformJob(item as unknown as Record<string, unknown>)
-    )
+    // Transform each job with task and evidence counts
+    const transformedItems = filteredJobs.map(job => {
+      const jobRecord = job as unknown as Record<string, unknown>
+      const jobId = jobRecord.id as string
+      
+      // Get tasks for this job
+      const jobTasks = getTasksForJob(tasksResult.items, jobId)
+      const taskIds = jobTasks.map(t => (t as unknown as Record<string, unknown>).id as string)
+      
+      // Get evidence count for these tasks
+      const evidenceCount = getEvidenceCountForTasks(evidenceResult.items, taskIds)
+      
+      return transformJob(jobRecord, jobTasks.length, evidenceCount)
+    })
 
     return c.json({
       items: transformedItems,
@@ -138,7 +177,12 @@ jobs.get('/:id', async (c) => {
   const client = getSmartSuiteClient()
 
   try {
-    const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
+    // Fetch job, tasks, and evidence in parallel
+    const [job, tasksResult, evidenceResult] = await Promise.all([
+      client.getRecord<Job>(TABLES.JOBS, jobId),
+      client.listRecords<Task>(TABLES.TASKS, { limit: 500 }),
+      client.listRecords<Evidence>(TABLES.EVIDENCE, { limit: 1000 })
+    ])
 
     // Verify ownership
     const userRecordId = await getUserRecordId(auth.userId)
@@ -146,8 +190,19 @@ jobs.get('/:id', async (c) => {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    // Transform to readable format
-    const transformed = transformJob(job as unknown as Record<string, unknown>)
+    // Get tasks for this job
+    const jobTasks = getTasksForJob(tasksResult.items, jobId)
+    const taskIds = jobTasks.map(t => (t as unknown as Record<string, unknown>).id as string)
+    
+    // Get evidence count for these tasks
+    const evidenceCount = getEvidenceCountForTasks(evidenceResult.items, taskIds)
+
+    // Transform to readable format with counts
+    const transformed = transformJob(
+      job as unknown as Record<string, unknown>,
+      jobTasks.length,
+      evidenceCount
+    )
 
     return c.json(transformed)
   } catch (error) {
@@ -163,12 +218,10 @@ jobs.post('/', async (c) => {
 
   try {
     const userRecordId = await getUserRecordId(auth.userId)
-
     if (!userRecordId) {
       return c.json({ error: 'User not found' }, 404)
     }
 
-    // Parse body as generic object to handle both camelCase and snake_case
     const body = await c.req.json() as Record<string, unknown>
 
     // Get values supporting both camelCase and snake_case
@@ -185,20 +238,18 @@ jobs.post('/', async (c) => {
     if (!address) {
       return c.json({ error: 'Missing required field: address' }, 400)
     }
-
     if (!clientName) {
       return c.json({ error: 'Missing required field: client_name' }, 400)
     }
 
-    // Create unique title with timestamp to avoid SmartSuite unique constraint
+    // Create unique title with timestamp
     const timestamp = Date.now()
     const jobTitle = title || `${clientName} - ${address} (${timestamp})`
 
-    // Format date for SmartSuite (plain string format)
+    // Format date for SmartSuite
     const formattedStartDate = startDate || new Date().toISOString().split('T')[0]
 
     // Create job with SmartSuite field IDs
-    // Linked record fields need array value
     const jobData: Record<string, unknown> = {
       title: jobTitle,
       [JOB_FIELDS.user]: [userRecordId],
@@ -209,21 +260,14 @@ jobs.post('/', async (c) => {
       [JOB_FIELDS.start_date]: formattedStartDate
     }
 
-    // Add optional fields if provided
-    if (clientPhone) {
-      jobData[JOB_FIELDS.client_phone] = clientPhone
-    }
-    if (clientEmail) {
-      jobData[JOB_FIELDS.client_email] = clientEmail
-    }
-    if (notes) {
-      jobData[JOB_FIELDS.notes] = notes
-    }
+    if (clientPhone) jobData[JOB_FIELDS.client_phone] = clientPhone
+    if (clientEmail) jobData[JOB_FIELDS.client_email] = clientEmail
+    if (notes) jobData[JOB_FIELDS.notes] = notes
 
     const job = await client.createRecord<Job>(TABLES.JOBS, jobData as Omit<Job, 'id'>)
 
-    // Transform to readable format
-    const transformed = transformJob(job as unknown as Record<string, unknown>)
+    // New job has 0 tasks and 0 evidence
+    const transformed = transformJob(job as unknown as Record<string, unknown>, 0, 0)
 
     return c.json(transformed, 201)
   } catch (error) {
@@ -239,7 +283,6 @@ jobs.patch('/:id', async (c) => {
   const client = getSmartSuiteClient()
 
   try {
-    // Get existing job and verify ownership
     const existingJob = await client.getRecord<Job>(TABLES.JOBS, jobId)
     const userRecordId = await getUserRecordId(auth.userId)
     
@@ -249,7 +292,6 @@ jobs.patch('/:id', async (c) => {
 
     const body = await c.req.json() as Record<string, unknown>
 
-    // Map request fields to SmartSuite field IDs (support both cases)
     const updateData: Record<string, unknown> = {}
     
     if (body.title !== undefined) updateData.title = body.title
@@ -276,8 +318,21 @@ jobs.patch('/:id', async (c) => {
       updateData as Partial<Job>
     )
 
-    // Transform to readable format
-    const transformed = transformJob(updatedJob as unknown as Record<string, unknown>)
+    // Fetch counts for the updated job
+    const [tasksResult, evidenceResult] = await Promise.all([
+      client.listRecords<Task>(TABLES.TASKS, { limit: 500 }),
+      client.listRecords<Evidence>(TABLES.EVIDENCE, { limit: 1000 })
+    ])
+
+    const jobTasks = getTasksForJob(tasksResult.items, jobId)
+    const taskIds = jobTasks.map(t => (t as unknown as Record<string, unknown>).id as string)
+    const evidenceCount = getEvidenceCountForTasks(evidenceResult.items, taskIds)
+
+    const transformed = transformJob(
+      updatedJob as unknown as Record<string, unknown>,
+      jobTasks.length,
+      evidenceCount
+    )
 
     return c.json(transformed)
   } catch (error) {
@@ -293,7 +348,6 @@ jobs.put('/:id', async (c) => {
   const client = getSmartSuiteClient()
 
   try {
-    // Get existing job and verify ownership
     const existingJob = await client.getRecord<Job>(TABLES.JOBS, jobId)
     const userRecordId = await getUserRecordId(auth.userId)
     
@@ -303,7 +357,6 @@ jobs.put('/:id', async (c) => {
 
     const body = await c.req.json() as Record<string, unknown>
 
-    // Map request fields to SmartSuite field IDs (support both cases)
     const updateData: Record<string, unknown> = {}
     
     if (body.title !== undefined) updateData.title = body.title
@@ -330,8 +383,21 @@ jobs.put('/:id', async (c) => {
       updateData as Partial<Job>
     )
 
-    // Transform to readable format
-    const transformed = transformJob(updatedJob as unknown as Record<string, unknown>)
+    // Fetch counts for the updated job
+    const [tasksResult, evidenceResult] = await Promise.all([
+      client.listRecords<Task>(TABLES.TASKS, { limit: 500 }),
+      client.listRecords<Evidence>(TABLES.EVIDENCE, { limit: 1000 })
+    ])
+
+    const jobTasks = getTasksForJob(tasksResult.items, jobId)
+    const taskIds = jobTasks.map(t => (t as unknown as Record<string, unknown>).id as string)
+    const evidenceCount = getEvidenceCountForTasks(evidenceResult.items, taskIds)
+
+    const transformed = transformJob(
+      updatedJob as unknown as Record<string, unknown>,
+      jobTasks.length,
+      evidenceCount
+    )
 
     return c.json(transformed)
   } catch (error) {
@@ -340,14 +406,13 @@ jobs.put('/:id', async (c) => {
   }
 })
 
-// Delete job (hard delete from SmartSuite)
+// Delete job (hard delete)
 jobs.delete('/:id', async (c) => {
   const auth = getAuth(c)
   const jobId = c.req.param('id')
   const client = getSmartSuiteClient()
 
   try {
-    // Get existing job and verify ownership
     const existingJob = await client.getRecord<Job>(TABLES.JOBS, jobId)
     const userRecordId = await getUserRecordId(auth.userId)
     
@@ -355,7 +420,6 @@ jobs.delete('/:id', async (c) => {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    // Hard delete the job from SmartSuite
     await client.deleteRecord(TABLES.JOBS, jobId)
 
     return c.json({ success: true })
