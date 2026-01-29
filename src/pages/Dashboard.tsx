@@ -50,33 +50,33 @@ export default function Dashboard() {
         pendingSync: storageStats.pendingCount || 0,
       })
 
-      // Placeholder recent jobs
+      // Placeholder recent jobs matching Job interface
       setRecentJobs([
         {
           id: '1',
-          orgId: '1',
+          userId: 'user_1',
+          title: 'Consumer Unit Replacement',
           address: '42 High Street, Bristol BS1 2AW',
+          postcode: 'BS1 2AW',
           clientName: 'Mrs Johnson',
           startDate: '2026-01-24',
           status: 'active',
-          equipmentId: null,
           createdAt: '2026-01-24T09:00:00Z',
           taskCount: 1,
           evidenceCount: 4,
-          completedEvidenceCount: 7,
         },
         {
           id: '2',
-          orgId: '1',
+          userId: 'user_1',
+          title: 'EICR Inspection',
           address: 'The Crown Inn, Exeter EX1 1AA',
+          postcode: 'EX1 1AA',
           clientName: 'Mr Davies',
           startDate: '2026-01-22',
           status: 'active',
-          equipmentId: null,
           createdAt: '2026-01-22T08:30:00Z',
           taskCount: 2,
           evidenceCount: 0,
-          completedEvidenceCount: 12,
         },
       ])
     } catch (error) {
@@ -217,7 +217,7 @@ export default function Dashboard() {
                     </div>
                     <div className="flex items-center gap-2 ml-4">
                       <span className="badge badge-success">
-                        {job.evidenceCount}/{job.completedEvidenceCount}
+                        {job.evidenceCount || 0} photos
                       </span>
                       <ChevronRight className="w-5 h-5 text-gray-400" />
                     </div>
