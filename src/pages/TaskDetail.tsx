@@ -69,10 +69,10 @@ export default function TaskDetail() {
 
         // Fetch existing evidence for this task
         const evidenceResponse = await evidenceApi.listByTask(taskId, token)
-        if (evidenceResponse.data) {
+        if (evidenceResponse.data?.items) {
           // Mark captured evidence types with their stages
           const captured: Record<string, CapturedEvidenceInfo> = {}
-          evidenceResponse.data.forEach((ev) => {
+          evidenceResponse.data.items.forEach((ev) => {
             if (ev.evidenceType) {
               captured[ev.evidenceType] = {
                 captured: true,
