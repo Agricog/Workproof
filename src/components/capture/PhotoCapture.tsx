@@ -1,9 +1,9 @@
 /**
  * WorkProof Photo Capture Component
- * Captures photos with GPS, timestamp, hash, and photo stage for immutable evidence
+ * Captures photos with GPS, timestamp, hash, photo stage, and notes for immutable evidence
  */
 import { useState, useEffect, useCallback } from 'react'
-import { Camera, X, RotateCcw, Check, MapPin, Clock, AlertCircle } from 'lucide-react'
+import { Camera, X, RotateCcw, Check, MapPin, Clock, AlertCircle, FileText } from 'lucide-react'
 import { useCamera } from '../../hooks/useCamera'
 import { useGeolocation } from '../../hooks/useGeolocation'
 import { compressImage, generateThumbnail, blobToBase64 } from '../../utils/compression'
@@ -57,6 +57,7 @@ export default function PhotoCapture({
 
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null)
   const [thumbnail, setThumbnail] = useState<string | null>(null)
+  const [notes, setNotes] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [storageWarning, setStorageWarning] = useState(false)
@@ -101,6 +102,7 @@ export default function PhotoCapture({
   const handleRetake = useCallback(() => {
     setCapturedBlob(null)
     setThumbnail(null)
+    setNotes('')
     setSaveError(null)
   }, [])
 
@@ -125,7 +127,8 @@ export default function PhotoCapture({
         taskId,
         jobId,
         evidenceType,
-        photoStage: photoStage || null,  // NEW: Include photo stage
+        photoStage: photoStage || null,
+        notes: notes.trim() || null,
         photoData,
         thumbnailData,
         hash,
@@ -157,7 +160,7 @@ export default function PhotoCapture({
     } finally {
       setIsSaving(false)
     }
-  }, [capturedBlob, thumbnail, taskId, jobId, evidenceType, photoStage, workerId, location, onCapture])
+  }, [capturedBlob, thumbnail, notes, taskId, jobId, evidenceType, photoStage, workerId, location, onCapture])
 
   // Error state
   if (cameraError) {
@@ -260,6 +263,24 @@ export default function PhotoCapture({
           </div>
         </div>
       </div>
+
+      {/* Notes Input - shown after photo capture */}
+      {capturedBlob && (
+        <div className="bg-gray-800 px-4 py-3">
+          <div className="flex items-start gap-2">
+            <FileText className="w-5 h-5 text-gray-400 mt-2 flex-shrink-0" />
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Add notes (optional) - e.g. 'Main DB before replacement'"
+              maxLength={500}
+              rows={2}
+              className="flex-1 bg-gray-700 text-white placeholder-gray-400 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+          </div>
+          <p className="text-gray-500 text-xs text-right mt-1">{notes.length}/500</p>
+        </div>
+      )}
 
       {/* Storage warning */}
       {storageWarning && (
