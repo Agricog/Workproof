@@ -15,6 +15,10 @@ const tasks = new Hono()
 tasks.use('*', rateLimitMiddleware)
 tasks.use('*', authMiddleware)
 
+// Simple in-memory cache for user record IDs (clerk_id -> smartsuite_id)
+const userIdCache = new Map<string, { id: string; timestamp: number }>()
+const USER_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+
 // Helper: Retry wrapper for SmartSuite calls
 async function withRetry<T>(
   fn: () => Promise<T>,
@@ -36,9 +40,13 @@ async function withRetry<T>(
   throw lastError
 }
 
-// Helper: Get user record ID from Clerk ID
+// Helper: Get user record ID from Clerk ID (with caching)
 async function getUserRecordId(clerkId: string): Promise<string | null> {
-  console.log('[TASKS] getUserRecordId called for:', clerkId)
+  // Check cache first
+  const cached = userIdCache.get(clerkId)
+  if (cached && Date.now() - cached.timestamp < USER_CACHE_TTL) {
+    return cached.id
+  }
   
   const client = getSmartSuiteClient()
   
@@ -47,13 +55,11 @@ async function getUserRecordId(clerkId: string): Promise<string | null> {
       client.findByField<User>(TABLES.USERS, USER_FIELDS.clerk_id, clerkId)
     )
     
-    if (!user) {
-      console.error('[TASKS] User not found in SmartSuite for clerk_id:', clerkId)
-      return null
+    if (user?.id) {
+      userIdCache.set(clerkId, { id: user.id, timestamp: Date.now() })
+      return user.id
     }
-    
-    console.log('[TASKS] Found user record ID:', user.id)
-    return user.id
+    return null
   } catch (error) {
     console.error('[TASKS] Error finding user:', error)
     return null
