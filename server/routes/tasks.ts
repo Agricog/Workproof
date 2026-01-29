@@ -49,6 +49,30 @@ function taskBelongsToJob(task: Record<string, unknown>, jobId: string): boolean
   return jobIds.includes(jobId)
 }
 
+// Helper: Extract status from SmartSuite format
+function extractStatus(statusRaw: unknown): string {
+  if (!statusRaw) return 'pending'
+  
+  // Plain string
+  if (typeof statusRaw === 'string') {
+    // If it looks like a SmartSuite ID (alphanumeric, 5-6 chars), return default
+    if (/^[a-zA-Z0-9]{5,6}$/.test(statusRaw)) {
+      return 'pending'
+    }
+    return statusRaw.toLowerCase()
+  }
+  
+  // Object with label (preferred) or value
+  if (typeof statusRaw === 'object' && statusRaw !== null) {
+    const statusObj = statusRaw as { label?: string; value?: string }
+    if (statusObj.label) {
+      return statusObj.label.toLowerCase().replace(/\s+/g, '_')
+    }
+  }
+  
+  return 'pending'
+}
+
 // Helper: Transform SmartSuite task record to readable format
 function transformTask(record: Record<string, unknown>): Record<string, unknown> {
   // Job field may be array (linked record)
@@ -74,21 +98,15 @@ function transformTask(record: Record<string, unknown>): Record<string, unknown>
     }
   }
 
-  // Log for debugging (remove later)
-  if (!taskType || taskType === 'unknown') {
-    console.log('Task type debug:', {
-      fieldValue: record[TASK_FIELDS.task_type],
-      title: record.title,
-      allFields: Object.keys(record)
-    })
-  }
+  // Extract status properly
+  const status = extractStatus(record[TASK_FIELDS.status])
 
   return {
     id: record.id,
     title: record.title,
     jobId: jobId || '',
     taskType: taskType || 'unknown',
-    status: record[TASK_FIELDS.status] || 'pending',
+    status: status,
     order: record[TASK_FIELDS.order] || 0,
     notes: record[TASK_FIELDS.notes],
     startedAt: record[TASK_FIELDS.started_at],
@@ -131,7 +149,7 @@ tasks.get('/', async (c) => {
     const status = c.req.query('status')
     if (status) {
       filteredItems = filteredItems.filter(item => {
-        const taskStatus = (item as unknown as Record<string, unknown>)[TASK_FIELDS.status]
+        const taskStatus = extractStatus((item as unknown as Record<string, unknown>)[TASK_FIELDS.status])
         return taskStatus === status
       })
     }
@@ -185,7 +203,7 @@ tasks.get('/job/:jobId', async (c) => {
     const status = c.req.query('status')
     if (status) {
       filteredItems = filteredItems.filter(item => {
-        const taskStatus = (item as unknown as Record<string, unknown>)[TASK_FIELDS.status]
+        const taskStatus = extractStatus((item as unknown as Record<string, unknown>)[TASK_FIELDS.status])
         return taskStatus === status
       })
     }
@@ -391,6 +409,7 @@ tasks.patch('/:id', async (c) => {
     if (body.status === 'in_progress' && !currentStarted) {
       updateData[TASK_FIELDS.started_at] = new Date().toISOString()
     }
+
     if (body.status === 'completed' && !currentCompleted) {
       updateData[TASK_FIELDS.completed_at] = new Date().toISOString()
     }
@@ -454,6 +473,7 @@ tasks.put('/:id', async (c) => {
     if (body.status === 'in_progress' && !currentStarted) {
       updateData[TASK_FIELDS.started_at] = new Date().toISOString()
     }
+
     if (body.status === 'completed' && !currentCompleted) {
       updateData[TASK_FIELDS.completed_at] = new Date().toISOString()
     }
@@ -514,7 +534,6 @@ tasks.post('/reorder', async (c) => {
 
   try {
     const body = await c.req.json() as Record<string, unknown>
-
     const jobId = (body.job_id || body.job) as string
     const taskIds = (body.task_ids || body.taskIds) as string[]
 
