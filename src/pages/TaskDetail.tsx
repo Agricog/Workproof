@@ -90,12 +90,6 @@ export default function TaskDetail() {
               }
             }
           })
-              captured[ev.evidenceType] = {
-                captured: true,
-                stage: ev.photoStage as PhotoStage | undefined
-              }
-            }
-          })
           setCapturedEvidence(captured)
         }
       }
