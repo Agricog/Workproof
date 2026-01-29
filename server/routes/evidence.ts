@@ -5,7 +5,7 @@ import { authMiddleware, getAuth } from '../middleware/auth.js'
 import { rateLimitMiddleware } from '../middleware/rateLimit.js'
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import type { Evidence, Task, Job, User } from '../types/index.js'
+import type { Evidence, Task, User } from '../types/index.js'
 
 const evidence = new Hono()
 
@@ -117,9 +117,10 @@ async function verifyTaskOwnership(taskId: string, clerkId: string): Promise<boo
     }
 
     // Get job to verify ownership
-    const job = await withRetry(() => 
-      client.getRecord<Record<string, unknown>>(TABLES.JOBS, jobId)
-    )
+    const job = await withRetry(async () => {
+      const result = await client.getRecord(TABLES.JOBS, jobId)
+      return result as unknown as Record<string, unknown>
+    })
     
     const jobUserIds = job[JOB_FIELDS.user] as string[] | string | undefined
     if (!jobUserIds) {
@@ -307,9 +308,10 @@ evidence.get('/counts-by-job/:jobId', async (c) => {
     }
 
     // Verify job ownership
-    const job = await withRetry(() => 
-      client.getRecord<Record<string, unknown>>(TABLES.JOBS, jobId)
-    )
+    const job = await withRetry(async () => {
+      const result = await client.getRecord(TABLES.JOBS, jobId)
+      return result as unknown as Record<string, unknown>
+    })
     
     const jobUserIds = job[JOB_FIELDS.user] as string[] | string | undefined
     const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds || '']
