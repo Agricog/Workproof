@@ -79,7 +79,7 @@ export default function TaskDetail() {
           const evidenceList = Array.isArray(evidenceResponse.data) 
             ? evidenceResponse.data 
             : (evidenceResponse.data as unknown as { items: Array<Record<string, unknown>> }).items || []
-          evidenceList.forEach((ev: Record<string, unknown>) => {
+          ;(evidenceList as Array<Record<string, unknown>>).forEach((ev) => {
             // Handle both camelCase and snake_case from API
             const evType = (ev.evidenceType || ev.evidence_type) as string | undefined
             const evStage = (ev.photoStage || ev.photo_stage) as PhotoStage | undefined
