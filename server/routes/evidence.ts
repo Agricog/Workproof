@@ -7,6 +7,27 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import type { Evidence, Task, User } from '../types/index.js'
 
+// Add this mapping near the top of the file
+const EVIDENCE_TYPE_MAP: Record<string, string> = {
+  'before_photo': 'Before Photo',
+  'after_photo': 'After Photo',
+  'meter_reading': 'Meter Reading',
+  'test_result': 'Test Result',
+  'label_photo': 'Label Photo',
+  'label_applied': 'Label Photo',
+  'certificate_photo': 'Certificate Photo',
+  'client_signature': 'Client Signature',
+  'wiring_photo': 'Wiring Photo',
+  'distribution_board': 'Distribution Board',
+  'earthing_arrangement': 'Earthing Arrangement',
+  'bonding_connection': 'Bonding Connection',
+  'rcd_test_reading': 'RCD Test Reading',
+  'insulation_test_reading': 'Insulation Test Reading',
+  'continuity_reading': 'Continuity Reading',
+  'zs_reading': 'ZS Reading',
+  'equipment_photo': 'Before Photo',  // Map to closest match
+}
+
 const evidence = new Hono()
 
 // Apply middleware to all routes
