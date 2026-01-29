@@ -69,8 +69,13 @@ export default function TaskDetail() {
       if (taskResponse.data) {
         setTask(taskResponse.data)
 
-        // Fetch existing evidence for this task
+       // Fetch existing evidence for this task
         const evidenceResponse = await evidenceApi.listByTask(taskId, token)
+        
+        // DEBUG: Log what we're getting
+        console.log('[TaskDetail] Evidence response:', JSON.stringify(evidenceResponse, null, 2))
+
+        if (evidenceResponse.data) {
 
         if (evidenceResponse.data) {
           // Mark captured evidence types with their stages
