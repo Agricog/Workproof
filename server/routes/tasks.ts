@@ -3,7 +3,8 @@ import { getSmartSuiteClient, TABLES } from '../lib/smartsuite.js'
 import { 
   USER_FIELDS, 
   JOB_FIELDS, 
-  TASK_FIELDS 
+  TASK_FIELDS,
+  EVIDENCE_FIELDS
 } from '../lib/smartsuite-fields.js'
 import { authMiddleware, getAuth } from '../middleware/auth.js'
 import { rateLimitMiddleware } from '../middleware/rateLimit.js'
@@ -199,6 +200,68 @@ function transformTask(record: Record<string, unknown>): Record<string, unknown>
   }
 }
 
+// Evidence type option ID to label mapping
+const EVIDENCE_TYPE_OPTIONS: Record<string, string> = {
+  'mVsNo': 'before photo',
+  'FTVO5': 'after photo',
+  'DcHm5': 'meter reading',
+  'test_result': 'test result',
+  'label_photo': 'label photo',
+  'certificate_photo': 'certificate photo',
+  'client_signature': 'client signature',
+  'wiring_photo': 'wiring photo',
+  'distribution_board': 'distribution board',
+  'earthing_arrangement': 'earthing arrangement',
+  'bonding_connection': 'bonding connection',
+  'rcd_test_reading': 'rcd test reading',
+  'insulation_test_reading': 'insulation test reading',
+  'continuity_reading': 'continuity reading',
+  'zs_reading': 'zs reading',
+}
+
+// Photo stage option ID to label mapping
+const PHOTO_STAGE_OPTIONS: Record<string, string> = {
+  'DZX3Z': 'before',
+  'U6zl3': 'after',
+  'Mw4Rd': 'during',
+}
+
+// Helper: Extract single select value with option ID mapping
+function extractSingleSelectValue(
+  value: unknown,
+  optionMap?: Record<string, string>
+): string | null {
+  if (!value) return null
+
+  let rawValue: string | null = null
+
+  if (typeof value === 'object' && value !== null) {
+    const obj = value as Record<string, unknown>
+    if (obj.value && typeof obj.value === 'string') {
+      rawValue = obj.value
+    } else if (obj.label && typeof obj.label === 'string') {
+      return obj.label.toLowerCase().replace(/\s+/g, '_')
+    }
+  } else if (typeof value === 'string') {
+    rawValue = value
+  }
+
+  if (!rawValue) return null
+
+  // Check if it's an option ID that needs mapping
+  if (optionMap && optionMap[rawValue]) {
+    return optionMap[rawValue].toLowerCase().replace(/\s+/g, '_')
+  }
+
+  // If it looks like an option ID but we don't have mapping, log it
+  if (/^[a-zA-Z0-9]{5,6}$/.test(rawValue)) {
+    console.log('[TASKS] Unknown option ID:', rawValue, '- please add to mapping')
+    return null
+  }
+
+  return rawValue.toLowerCase().replace(/\s+/g, '_')
+}
+
 // List tasks - supports both /tasks?job_id=xxx and /tasks/job/:jobId
 tasks.get('/', async (c) => {
   const auth = getAuth(c)
@@ -303,6 +366,79 @@ tasks.get('/job/:jobId', async (c) => {
   } catch (error) {
     console.error('[TASKS] Error listing tasks:', error)
     return c.json({ error: 'Failed to list tasks' }, 500)
+  }
+})
+
+// Get task with evidence - combined endpoint for faster loading
+tasks.get('/:id/with-evidence', async (c) => {
+  const auth = getAuth(c)
+  const taskId = c.req.param('id')
+  const client = getSmartSuiteClient()
+
+  console.log('[TASKS] GET /:id/with-evidence called - taskId:', taskId)
+
+  try {
+    // 1. Get task
+    const task = await withRetry(() =>
+      client.getRecord<Task>(TABLES.TASKS, taskId)
+    )
+
+    const taskJobIds = task[TASK_FIELDS.job as keyof Task] as string[] | string | undefined
+    const jobId = Array.isArray(taskJobIds) ? taskJobIds[0] : taskJobIds
+
+    if (!jobId) {
+      return c.json({ error: 'Task has no associated job' }, 400)
+    }
+
+    // 2. Verify ownership ONCE
+    const isOwner = await verifyJobOwnership(jobId, auth.userId)
+    if (!isOwner) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
+
+    // 3. Fetch evidence for this task (no separate ownership check needed)
+    const evidenceResult = await withRetry(() =>
+      client.listRecords(TABLES.EVIDENCE, { limit: 100 })
+    )
+
+    // Filter evidence by task_id
+    const taskEvidence = evidenceResult.items.filter((item: Record<string, unknown>) => {
+      const evTaskIds = item[EVIDENCE_FIELDS.task] as string[] | string | undefined
+      if (!evTaskIds) return false
+      const ids = Array.isArray(evTaskIds) ? evTaskIds : [evTaskIds]
+      return ids.includes(taskId)
+    })
+
+    // Transform task
+    const transformedTask = transformTask(task as unknown as Record<string, unknown>)
+
+    // Transform evidence
+    const transformedEvidence = taskEvidence.map((ev: Record<string, unknown>) => {
+      const evType = ev[EVIDENCE_FIELDS.evidence_type]
+      const evStage = ev[EVIDENCE_FIELDS.photo_stage]
+      const photoUrl = ev[EVIDENCE_FIELDS.photo_url] as string | undefined
+
+      return {
+        id: ev.id,
+        taskId: taskId,
+        evidenceType: extractSingleSelectValue(evType, EVIDENCE_TYPE_OPTIONS),
+        photoStage: extractSingleSelectValue(evStage, PHOTO_STAGE_OPTIONS),
+        photoUrl: photoUrl || null
+      }
+    })
+
+    console.log('[TASKS] Returning task with', transformedEvidence.length, 'evidence items')
+
+    return c.json({
+      task: transformedTask,
+      evidence: {
+        items: transformedEvidence,
+        total: transformedEvidence.length
+      }
+    })
+  } catch (error) {
+    console.error('[TASKS] Error fetching task with evidence:', error)
+    return c.json({ error: 'Failed to fetch task' }, 500)
   }
 })
 
