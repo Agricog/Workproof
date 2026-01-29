@@ -262,8 +262,8 @@ export default function TaskDetail() {
               className="flex-1 bg-gray-200 rounded-full h-3"
               role="progressbar"
               aria-valuenow={
-                task.requiredEvidenceCount
-                  ? ((task.evidenceCount || 0) / task.requiredEvidenceCount) * 100
+                config.requiredEvidence.length
+                  ? (Object.keys(capturedEvidence).length / config.requiredEvidence.length) * 100
                   : 0
               }
               aria-valuemin={0}
@@ -274,13 +274,18 @@ export default function TaskDetail() {
                 className="bg-green-600 h-3 rounded-full transition-all"
                 style={{
                   width: `${
-                    task.requiredEvidenceCount
-                      ? ((task.evidenceCount || 0) / task.requiredEvidenceCount) * 100
+                    config.requiredEvidence.length
+                      ? (Object.keys(capturedEvidence).length / config.requiredEvidence.length) * 100
                       : 0
                   }%`,
                 }}
               ></div>
             </div>
+            <span className="text-sm font-medium text-gray-700">
+              {Object.keys(capturedEvidence).length}/{config.requiredEvidence.length}
+            </span>
+          </div>
+        </div>
             <span className="text-sm font-medium text-gray-700">
               {task.evidenceCount || 0}/{task.requiredEvidenceCount || 0}
             </span>
