@@ -1,6 +1,6 @@
 /**
  * WorkProof Jobs List
- * All jobs with filtering
+ * All jobs with filtering and accurate task/evidence counts
  */
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
@@ -21,6 +21,7 @@ import {
   Trash2,
   FileEdit,
   Play,
+  Camera,
 } from 'lucide-react'
 import { trackPageView, trackError } from '../utils/analytics'
 import { jobsApi } from '../services/api'
@@ -308,9 +309,12 @@ export default function Jobs() {
                       </div>
                       <div className="flex items-center gap-2">
                         <div className="text-right">
-                          <p className="text-sm font-medium text-gray-900">
-                            {job.evidenceCount || 0}
-                          </p>
+                          <div className="flex items-center gap-1 justify-end">
+                            <Camera className="w-3 h-3 text-gray-400" aria-hidden="true" />
+                            <p className="text-sm font-medium text-gray-900">
+                              {job.evidenceCount || 0}
+                            </p>
+                          </div>
                           <p className="text-xs text-gray-500">photos</p>
                         </div>
                         <ChevronRight className="w-5 h-5 text-gray-400" aria-hidden="true" />
