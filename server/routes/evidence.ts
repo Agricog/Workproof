@@ -1,10 +1,15 @@
 import { Hono } from 'hono'
 import { getSmartSuiteClient, TABLES } from '../lib/smartsuite.js'
-import { USER_FIELDS, TASK_FIELDS, EVIDENCE_FIELDS } from '../lib/smartsuite-fields.js'
+import { USER_FIELDS, TASK_FIELDS, JOB_FIELDS, EVIDENCE_FIELDS } from '../lib/smartsuite-fields.js'
 import { authMiddleware, getAuth } from '../middleware/auth.js'
 import { rateLimitMiddleware } from '../middleware/rateLimit.js'
-import { getSignedUploadUrl, generateEvidenceKey, validateR2Config, deleteObject, extractKeyFromUrl } from '../lib/r2.js'
-import type { Evidence, Task, User } from '../types/index.js'
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand
+} from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import type { Evidence, Task, Job, User } from '../types/index.js'
 
 const evidence = new Hono()
 
@@ -12,196 +17,97 @@ const evidence = new Hono()
 evidence.use('*', rateLimitMiddleware)
 evidence.use('*', authMiddleware)
 
-// Helper: Get user record ID from Clerk ID
-async function getUserRecordId(clerkId: string): Promise<string | null> {
-  const client = getSmartSuiteClient()
-  const user = await client.findByField<User>(TABLES.USERS, USER_FIELDS.clerk_id, clerkId)
-  return user?.id || null
-}
-
-// Helper: Extract task ID from various SmartSuite linked record formats
-function extractTaskIds(taskValue: unknown): string[] {
-  if (!taskValue) return []
-  
-  // Handle array format
-  if (Array.isArray(taskValue)) {
-    return taskValue.flatMap(item => {
-      if (typeof item === 'string') return [item]
-      if (typeof item === 'object' && item !== null && 'id' in item) {
-        return [(item as { id: string }).id]
-      }
-      return []
-    })
-  }
-  
-  // Handle string format
-  if (typeof taskValue === 'string') {
-    return [taskValue]
-  }
-  
-  // Handle object format { id: "xxx" }
-  if (typeof taskValue === 'object' && taskValue !== null && 'id' in taskValue) {
-    return [(taskValue as { id: string }).id]
-  }
-  
-  return []
-}
-
-// Helper: Check if evidence belongs to task
-function evidenceBelongsToTask(evidence: Record<string, unknown>, taskId: string): boolean {
-  const taskValue = evidence[EVIDENCE_FIELDS.task]
-  const taskIds = extractTaskIds(taskValue)
-  return taskIds.includes(taskId)
-}
-
-// Helper: Verify user owns the task (through job ownership)
-async function verifyTaskOwnership(taskId: string, clerkId: string): Promise<boolean> {
-  const client = getSmartSuiteClient()
-  const userRecordId = await getUserRecordId(clerkId)
-  
-  if (!userRecordId) return false
-
-  try {
-    // Get task to find job
-    const task = await client.getRecord<Task>(TABLES.TASKS, taskId)
-    const taskJobIds = task[TASK_FIELDS.job as keyof Task] as string[] | string
-    const jobId = Array.isArray(taskJobIds) ? taskJobIds[0] : taskJobIds
-
-    if (!jobId) return false
-
-    // Get job to verify ownership
-    const job = await client.getRecord(TABLES.JOBS, jobId) as unknown as Record<string, unknown>
-    const jobUserIds = job['s11e8c3905'] as string[] | string | undefined // JOB_FIELDS.user
-    if (!jobUserIds) return false
-    
-    const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
-    return userIds.includes(userRecordId)
-  } catch {
-    return false
-  }
-}
-
-// Helper: Verify user owns the job
-async function verifyJobOwnership(jobId: string, clerkId: string): Promise<boolean> {
-  const client = getSmartSuiteClient()
-  const userRecordId = await getUserRecordId(clerkId)
-  
-  if (!userRecordId) return false
-
-  try {
-    const job = await client.getRecord(TABLES.JOBS, jobId) as unknown as Record<string, unknown>
-    const jobUserIds = job['s11e8c3905'] as string[] | string | undefined
-    if (!jobUserIds) return false
-    
-    const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
-    return userIds.includes(userRecordId)
-  } catch {
-    return false
-  }
-}
-
-// Helper: Extract evidence type from title (fallback when field is empty)
-function extractEvidenceTypeFromTitle(title: unknown): string | null {
-  if (typeof title !== 'string') return null
-  // Title format: "evidence_type - timestamp"
-  const dashIndex = title.indexOf(' - ')
-  if (dashIndex > 0) {
-    return title.substring(0, dashIndex)
-  }
-  return null
-}
-
-// Helper: Transform SmartSuite evidence record to readable format
-function transformEvidence(record: Record<string, unknown>): Record<string, unknown> {
-  // Task field may be array (linked record)
-  const taskIds = extractTaskIds(record[EVIDENCE_FIELDS.task])
-  const taskId = taskIds[0] || ''
-
-  // Get evidence type - try field first, then extract from title as fallback
-  let evidenceType = record[EVIDENCE_FIELDS.evidence_type] as string | undefined
-  if (!evidenceType || evidenceType === 'unknown') {
-    evidenceType = extractEvidenceTypeFromTitle(record.title) || 'unknown'
-  }
-
-  return {
-    id: record.id,
-    taskId: taskId,
-    evidenceType: evidenceType,
-    photoUrl: record[EVIDENCE_FIELDS.photo_url] || '',
-    photoHash: record[EVIDENCE_FIELDS.photo_hash] || '',
-    latitude: record[EVIDENCE_FIELDS.latitude],
-    longitude: record[EVIDENCE_FIELDS.longitude],
-    gpsAccuracy: record[EVIDENCE_FIELDS.gps_accuracy],
-    capturedAt: record[EVIDENCE_FIELDS.captured_at],
-    syncedAt: record[EVIDENCE_FIELDS.synced_at],
-    isSynced: record[EVIDENCE_FIELDS.is_synced] || false
-  }
-}
-
-// Get evidence counts by job - single API call for all tasks
-// This endpoint avoids rate limiting by fetching once and counting in memory
-evidence.get('/counts-by-job', async (c) => {
-  const auth = getAuth(c)
-  const jobId = c.req.query('job_id')
-  const client = getSmartSuiteClient()
-
-  if (!jobId) {
-    return c.json({ error: 'Missing job_id parameter' }, 400)
-  }
-
-  try {
-    // Verify job ownership
-    const isOwner = await verifyJobOwnership(jobId, auth.userId)
-    if (!isOwner) {
-      return c.json({ error: 'Forbidden' }, 403)
-    }
-
-    // Get all tasks for this job first
-    const tasksResult = await client.listRecords<Task>(TABLES.TASKS, { limit: 100 })
-    const jobTasks = tasksResult.items.filter(task => {
-      const taskRecord = task as unknown as Record<string, unknown>
-      const taskJobIds = taskRecord[TASK_FIELDS.job] as string[] | string | undefined
-      if (!taskJobIds) return false
-      const jobIds = Array.isArray(taskJobIds) ? taskJobIds : [taskJobIds]
-      return jobIds.includes(jobId)
-    })
-
-    const taskIds = jobTasks.map(t => t.id)
-
-    // Fetch all evidence in one call
-    const evidenceResult = await client.listRecords<Evidence>(TABLES.EVIDENCE, { limit: 500 })
-
-    // Count evidence per task
-    const counts: Record<string, number> = {}
-    taskIds.forEach(id => { counts[id] = 0 })
-
-    evidenceResult.items.forEach(item => {
-      const record = item as unknown as Record<string, unknown>
-      const evidenceTaskIds = extractTaskIds(record[EVIDENCE_FIELDS.task])
-      
-      evidenceTaskIds.forEach(taskId => {
-        if (taskIds.includes(taskId)) {
-          counts[taskId] = (counts[taskId] || 0) + 1
-        }
-      })
-    })
-
-    return c.json({ counts })
-  } catch (error) {
-    console.error('Error getting evidence counts:', error)
-    return c.json({ error: 'Failed to get evidence counts' }, 500)
+// R2 client
+const r2Client = new S3Client({
+  region: 'auto',
+  endpoint: process.env.R2_ENDPOINT || '',
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || ''
   }
 })
 
-// List evidence for a task
-evidence.get('/', async (c) => {
-  const auth = getAuth(c)
-  const taskId = c.req.query('task_id')
+const R2_BUCKET = process.env.R2_BUCKET || 'workproof-evidence'
+
+// Helper: Get user record ID from Clerk ID
+async function getUserRecordId(clerkId: string): Promise<string | null> {
+  const client = getSmartSuiteClient()
+  const result = await client.listRecords<User>(TABLES.USERS, {
+    filter: {
+      operator: 'and',
+      fields: [{ field: USER_FIELDS.clerk_id, comparison: 'is', value: clerkId }]
+    },
+    limit: 1
+  })
+  return result.items[0]?.id || null
+}
+
+// Helper: Verify task ownership through job
+async function verifyTaskOwnership(taskId: string, clerkId: string): Promise<boolean> {
   const client = getSmartSuiteClient()
 
-  if (!taskId) {
-    return c.json({ error: 'Missing task_id parameter' }, 400)
+  // Get user record ID
+  const userRecordId = await getUserRecordId(clerkId)
+  if (!userRecordId) return false
+
+  // Get task
+  const task = await client.getRecord<Task>(TABLES.TASKS, taskId)
+  if (!task) return false
+
+  // Get job ID from task
+  const jobIds = task[TASK_FIELDS.job as keyof Task] as string[] | string
+  const jobId = Array.isArray(jobIds) ? jobIds[0] : jobIds
+  if (!jobId) return false
+
+  // Get job
+  const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
+  if (!job) return false
+
+  // Check if job belongs to user
+  const jobUserIds = job[JOB_FIELDS.user as keyof Job] as string[] | string
+  const jobUserId = Array.isArray(jobUserIds) ? jobUserIds[0] : jobUserIds
+
+  return jobUserId === userRecordId
+}
+
+// Transform SmartSuite evidence to API format
+function transformEvidence(item: Record<string, unknown>): Record<string, unknown> {
+  const taskIds = item[EVIDENCE_FIELDS.task] as string[] | string | undefined
+  const taskId = Array.isArray(taskIds) ? taskIds[0] : taskIds
+
+  // Handle captured_at date format
+  let capturedAt = item[EVIDENCE_FIELDS.captured_at]
+  if (capturedAt && typeof capturedAt === 'object' && 'date' in (capturedAt as Record<string, unknown>)) {
+    capturedAt = (capturedAt as Record<string, unknown>).date
   }
+
+  // Handle synced_at date format
+  let syncedAt = item[EVIDENCE_FIELDS.synced_at]
+  if (syncedAt && typeof syncedAt === 'object' && 'date' in (syncedAt as Record<string, unknown>)) {
+    syncedAt = (syncedAt as Record<string, unknown>).date
+  }
+
+  return {
+    id: item.id,
+    taskId: taskId || null,
+    evidenceType: item[EVIDENCE_FIELDS.evidence_type] || null,
+    photoStage: item[EVIDENCE_FIELDS.photo_stage] || null,  // NEW
+    photoUrl: item[EVIDENCE_FIELDS.photo_url] || null,
+    photoHash: item[EVIDENCE_FIELDS.photo_hash] || null,
+    latitude: item[EVIDENCE_FIELDS.latitude] || null,
+    longitude: item[EVIDENCE_FIELDS.longitude] || null,
+    gpsAccuracy: item[EVIDENCE_FIELDS.gps_accuracy] || null,
+    capturedAt: capturedAt || null,
+    syncedAt: syncedAt || null,
+    isSynced: item[EVIDENCE_FIELDS.is_synced] || false
+  }
+}
+
+// Get evidence by task ID (with in-memory filtering for linked records)
+evidence.get('/task/:taskId', async (c) => {
+  const auth = getAuth(c)
+  const taskId = c.req.param('taskId')
+  const client = getSmartSuiteClient()
 
   try {
     // Verify ownership
@@ -210,29 +116,131 @@ evidence.get('/', async (c) => {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    // Fetch all evidence and filter in memory (SmartSuite linked record limitation)
-    const result = await client.listRecords<Evidence>(TABLES.EVIDENCE, {
-      limit: 200
+    // Fetch all evidence (linked record fields don't support comparison operators)
+    const result = await client.listRecords<Evidence>(TABLES.EVIDENCE, { limit: 500 })
+
+    // Filter in-memory by task ID
+    const filteredItems = result.items.filter((item) => {
+      const evidenceTaskIds = item[EVIDENCE_FIELDS.task as keyof Evidence] as string[] | string | undefined
+      if (!evidenceTaskIds) return false
+      const ids = Array.isArray(evidenceTaskIds) ? evidenceTaskIds : [evidenceTaskIds]
+      return ids.includes(taskId)
     })
 
-    // Filter by task ID in memory
-    const filteredItems = result.items.filter(item => {
-      const record = item as unknown as Record<string, unknown>
-      return evidenceBelongsToTask(record, taskId)
-    })
-
-    // Transform each evidence to readable format
-    const transformedItems = filteredItems.map(item =>
+    // Transform to readable format
+    const transformed = filteredItems.map((item) =>
       transformEvidence(item as unknown as Record<string, unknown>)
     )
 
-    return c.json({
-      items: transformedItems,
-      total: transformedItems.length
-    })
+    return c.json(transformed)
   } catch (error) {
-    console.error('Error listing evidence:', error)
-    return c.json({ error: 'Failed to list evidence' }, 500)
+    console.error('Error fetching evidence by task:', error)
+    return c.json({ error: 'Failed to fetch evidence' }, 500)
+  }
+})
+
+// Get evidence by job ID (for audit packs)
+evidence.get('/job/:jobId', async (c) => {
+  const auth = getAuth(c)
+  const jobId = c.req.param('jobId')
+  const client = getSmartSuiteClient()
+
+  try {
+    // Get user record ID
+    const userRecordId = await getUserRecordId(auth.userId)
+    if (!userRecordId) {
+      return c.json({ error: 'User not found' }, 404)
+    }
+
+    // Verify job ownership
+    const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
+    if (!job) {
+      return c.json({ error: 'Job not found' }, 404)
+    }
+    const jobUserIds = job[JOB_FIELDS.user as keyof Job] as string[] | string
+    const jobUserId = Array.isArray(jobUserIds) ? jobUserIds[0] : jobUserIds
+    if (jobUserId !== userRecordId) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
+
+    // Get all tasks for this job
+    const tasksResult = await client.listRecords<Task>(TABLES.TASKS, { limit: 100 })
+    const jobTasks = tasksResult.items.filter((task) => {
+      const taskJobIds = task[TASK_FIELDS.job as keyof Task] as string[] | string | undefined
+      if (!taskJobIds) return false
+      const ids = Array.isArray(taskJobIds) ? taskJobIds : [taskJobIds]
+      return ids.includes(jobId)
+    })
+    const taskIds = jobTasks.map((t) => t.id)
+
+    // Get all evidence and filter by task IDs
+    const evidenceResult = await client.listRecords<Evidence>(TABLES.EVIDENCE, { limit: 500 })
+    const jobEvidence = evidenceResult.items.filter((item) => {
+      const evidenceTaskIds = item[EVIDENCE_FIELDS.task as keyof Evidence] as string[] | string | undefined
+      if (!evidenceTaskIds) return false
+      const ids = Array.isArray(evidenceTaskIds) ? evidenceTaskIds : [evidenceTaskIds]
+      return ids.some((id) => taskIds.includes(id))
+    })
+
+    // Transform and return
+    const transformed = jobEvidence.map((item) =>
+      transformEvidence(item as unknown as Record<string, unknown>)
+    )
+
+    return c.json(transformed)
+  } catch (error) {
+    console.error('Error fetching evidence by job:', error)
+    return c.json({ error: 'Failed to fetch evidence' }, 500)
+  }
+})
+
+// Count evidence by job (fast)
+evidence.get('/job/:jobId/count', async (c) => {
+  const auth = getAuth(c)
+  const jobId = c.req.param('jobId')
+  const client = getSmartSuiteClient()
+
+  try {
+    // Get user record ID
+    const userRecordId = await getUserRecordId(auth.userId)
+    if (!userRecordId) {
+      return c.json({ error: 'User not found' }, 404)
+    }
+
+    // Verify job ownership
+    const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
+    if (!job) {
+      return c.json({ error: 'Job not found' }, 404)
+    }
+    const jobUserIds = job[JOB_FIELDS.user as keyof Job] as string[] | string
+    const jobUserId = Array.isArray(jobUserIds) ? jobUserIds[0] : jobUserIds
+    if (jobUserId !== userRecordId) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
+
+    // Get all tasks for this job
+    const tasksResult = await client.listRecords<Task>(TABLES.TASKS, { limit: 100 })
+    const jobTasks = tasksResult.items.filter((task) => {
+      const taskJobIds = task[TASK_FIELDS.job as keyof Task] as string[] | string | undefined
+      if (!taskJobIds) return false
+      const ids = Array.isArray(taskJobIds) ? taskJobIds : [taskJobIds]
+      return ids.includes(jobId)
+    })
+    const taskIds = jobTasks.map((t) => t.id)
+
+    // Count evidence
+    const evidenceResult = await client.listRecords<Evidence>(TABLES.EVIDENCE, { limit: 500 })
+    const count = evidenceResult.items.filter((item) => {
+      const evidenceTaskIds = item[EVIDENCE_FIELDS.task as keyof Evidence] as string[] | string | undefined
+      if (!evidenceTaskIds) return false
+      const ids = Array.isArray(evidenceTaskIds) ? evidenceTaskIds : [evidenceTaskIds]
+      return ids.some((id) => taskIds.includes(id))
+    }).length
+
+    return c.json({ count })
+  } catch (error) {
+    console.error('Error counting evidence:', error)
+    return c.json({ error: 'Failed to count evidence' }, 500)
   }
 })
 
@@ -245,9 +253,13 @@ evidence.get('/:id', async (c) => {
   try {
     const evidenceRecord = await client.getRecord<Evidence>(TABLES.EVIDENCE, evidenceId)
 
+    if (!evidenceRecord) {
+      return c.json({ error: 'Evidence not found' }, 404)
+    }
+
     // Get task ID from evidence
-    const taskIds = extractTaskIds(evidenceRecord[EVIDENCE_FIELDS.task as keyof Evidence])
-    const taskId = taskIds[0]
+    const evidenceTaskIds = evidenceRecord[EVIDENCE_FIELDS.task as keyof Evidence] as string[] | string
+    const taskId = Array.isArray(evidenceTaskIds) ? evidenceTaskIds[0] : evidenceTaskIds
 
     // Verify ownership through task
     const isOwner = await verifyTaskOwnership(taskId, auth.userId)
@@ -270,34 +282,32 @@ evidence.post('/upload-url', async (c) => {
   const auth = getAuth(c)
 
   try {
-    // Validate R2 configuration
-    const r2Config = validateR2Config()
-    if (!r2Config.valid) {
-      console.error('R2 configuration missing:', r2Config.missing)
-      return c.json({ error: 'File storage not configured' }, 500)
-    }
-
-    const body = await c.req.json() as Record<string, unknown>
+    const body = (await c.req.json()) as Record<string, unknown>
     const filename = body.filename as string
     const contentType = (body.content_type || body.contentType || 'image/jpeg') as string
-    const jobId = (body.job_id || body.jobId || 'unknown') as string
-    const taskId = (body.task_id || body.taskId || 'unknown') as string
 
     if (!filename) {
       return c.json({ error: 'Missing filename' }, 400)
     }
 
-    // Validate content type (only allow images)
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/heic']
-    if (!allowedTypes.includes(contentType)) {
-      return c.json({ error: 'Invalid file type. Only JPEG, PNG, WebP, and HEIC images are allowed.' }, 400)
-    }
+    // Generate unique key
+    const timestamp = Date.now()
+    const sanitizedFilename = filename.replace(/[^a-zA-Z0-9.-]/g, '_')
+    const key = `evidence/${auth.userId}/${timestamp}-${sanitizedFilename}`
 
-    // Generate unique key with proper structure
-    const key = generateEvidenceKey(auth.userId, jobId, taskId, filename)
+    // Generate signed upload URL
+    const command = new PutObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+      ContentType: contentType
+    })
 
-    // Generate signed upload URL (expires in 5 minutes)
-    const { uploadUrl, publicUrl } = await getSignedUploadUrl(key, contentType, 300)
+    const uploadUrl = await getSignedUrl(r2Client, command, { expiresIn: 300 })
+
+    // Public URL for accessing the file
+    const publicUrl = process.env.R2_PUBLIC_URL
+      ? `${process.env.R2_PUBLIC_URL}/${key}`
+      : `https://${R2_BUCKET}.${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${key}`
 
     return c.json({
       upload_url: uploadUrl,
@@ -316,17 +326,24 @@ evidence.post('/', async (c) => {
   const client = getSmartSuiteClient()
 
   try {
-    const body = await c.req.json() as Record<string, unknown>
+    const body = (await c.req.json()) as Record<string, unknown>
 
     // Support both formats
     const taskId = (body.task_id || body.taskId) as string
     const evidenceType = (body.evidence_type || body.evidenceType) as string
+    const photoStage = (body.photo_stage || body.photoStage) as string | undefined  // NEW
     const photoUrl = (body.photo_url || body.photoUrl) as string
     const photoHash = (body.photo_hash || body.photoHash) as string
 
     // Validate required fields
     if (!taskId || !evidenceType || !photoUrl) {
       return c.json({ error: 'Missing required fields: task_id, evidence_type, photo_url' }, 400)
+    }
+
+    // Validate photo_stage if provided
+    const validStages = ['before', 'during', 'after']
+    if (photoStage && !validStages.includes(photoStage)) {
+      return c.json({ error: 'Invalid photo_stage. Must be: before, during, or after' }, 400)
     }
 
     // Verify ownership
@@ -342,11 +359,15 @@ evidence.post('/', async (c) => {
       [EVIDENCE_FIELDS.evidence_type]: evidenceType,
       [EVIDENCE_FIELDS.photo_url]: photoUrl,
       [EVIDENCE_FIELDS.photo_hash]: photoHash || '',
-      [EVIDENCE_FIELDS.captured_at]: (body.captured_at || body.capturedAt) as string || new Date().toISOString(),
+      [EVIDENCE_FIELDS.captured_at]:
+        ((body.captured_at || body.capturedAt) as string) || new Date().toISOString(),
       [EVIDENCE_FIELDS.synced_at]: new Date().toISOString()
     }
 
-    // Note: is_synced is a Checklist field - omit it or use proper format if needed
+    // Add photo_stage if provided
+    if (photoStage) {
+      evidenceData[EVIDENCE_FIELDS.photo_stage] = photoStage
+    }
 
     // Add optional GPS fields
     const latitude = body.latitude as number | undefined
@@ -363,7 +384,10 @@ evidence.post('/', async (c) => {
       evidenceData[EVIDENCE_FIELDS.gps_accuracy] = gpsAccuracy
     }
 
-    const created = await client.createRecord<Evidence>(TABLES.EVIDENCE, evidenceData as Omit<Evidence, 'id'>)
+    const created = await client.createRecord<Evidence>(
+      TABLES.EVIDENCE,
+      evidenceData as Omit<Evidence, 'id'>
+    )
 
     // Transform to readable format
     const transformed = transformEvidence(created as unknown as Record<string, unknown>)
@@ -386,27 +410,15 @@ evidence.delete('/:id', async (c) => {
     const existingEvidence = await client.getRecord<Evidence>(TABLES.EVIDENCE, evidenceId)
 
     // Get task ID from evidence
-    const taskIds = extractTaskIds(existingEvidence[EVIDENCE_FIELDS.task as keyof Evidence])
-    const taskId = taskIds[0]
+    const evidenceTaskIds = existingEvidence[EVIDENCE_FIELDS.task as keyof Evidence] as
+      | string[]
+      | string
+    const taskId = Array.isArray(evidenceTaskIds) ? evidenceTaskIds[0] : evidenceTaskIds
 
     // Verify ownership through task
     const isOwner = await verifyTaskOwnership(taskId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
-    }
-
-    // Delete file from R2 if URL exists
-    const photoUrl = existingEvidence[EVIDENCE_FIELDS.photo_url as keyof Evidence] as string
-    if (photoUrl) {
-      const key = extractKeyFromUrl(photoUrl)
-      if (key) {
-        try {
-          await deleteObject(key)
-        } catch (r2Error) {
-          console.error('Failed to delete file from R2:', r2Error)
-          // Continue with SmartSuite deletion even if R2 fails
-        }
-      }
     }
 
     await client.deleteRecord(TABLES.EVIDENCE, evidenceId)
