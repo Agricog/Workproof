@@ -79,8 +79,15 @@ export default function TaskDetail() {
           const evidenceList = Array.isArray(evidenceResponse.data) 
             ? evidenceResponse.data 
             : (evidenceResponse.data as unknown as { items: Array<{ evidenceType?: string; photoStage?: string }> }).items || []
-          evidenceList.forEach((ev) => {
-            if (ev.evidenceType) {
+          evidenceList.forEach((ev: Record<string, unknown>) => {
+  const evType = (ev.evidenceType || ev.evidence_type) as string | undefined
+  if (evType) {
+    captured[evType] = {
+      captured: true,
+      stage: (ev.photoStage || ev.photo_stage) as PhotoStage | undefined
+    }
+  }
+})
               captured[ev.evidenceType] = {
                 captured: true,
                 stage: ev.photoStage as PhotoStage | undefined
