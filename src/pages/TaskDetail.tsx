@@ -78,16 +78,18 @@ export default function TaskDetail() {
           // Handle both array and { items: [] } response formats
           const evidenceList = Array.isArray(evidenceResponse.data) 
             ? evidenceResponse.data 
-            : (evidenceResponse.data as unknown as { items: Array<{ evidenceType?: string; photoStage?: string }> }).items || []
+            : (evidenceResponse.data as unknown as { items: Array<Record<string, unknown>> }).items || []
           evidenceList.forEach((ev: Record<string, unknown>) => {
-  const evType = (ev.evidenceType || ev.evidence_type) as string | undefined
-  if (evType) {
-    captured[evType] = {
-      captured: true,
-      stage: (ev.photoStage || ev.photo_stage) as PhotoStage | undefined
-    }
-  }
-})
+            // Handle both camelCase and snake_case from API
+            const evType = (ev.evidenceType || ev.evidence_type) as string | undefined
+            const evStage = (ev.photoStage || ev.photo_stage) as PhotoStage | undefined
+            if (evType) {
+              captured[evType] = {
+                captured: true,
+                stage: evStage
+              }
+            }
+          })
               captured[ev.evidenceType] = {
                 captured: true,
                 stage: ev.photoStage as PhotoStage | undefined
