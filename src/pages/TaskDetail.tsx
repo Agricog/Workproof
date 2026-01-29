@@ -208,7 +208,7 @@ export default function TaskDetail() {
   }
 
   const config = getTaskTypeConfig(task.taskType)
-  const statusConfig = TASK_STATUS_CONFIG[task.status]
+  const statusConfig = TASK_STATUS_CONFIG[task.status] || TASK_STATUS_CONFIG.pending
 
   if (showCamera && selectedEvidenceType) {
     return (
