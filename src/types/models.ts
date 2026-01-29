@@ -1,84 +1,78 @@
 /**
  * WorkProof Core Data Models
- * Based on the WorkProof product brief data model
  * All types follow strict TypeScript - no 'any' types
  */
 
 // ============================================================================
-// ORGANISATION
+// BASE RECORD
 // ============================================================================
 
-export interface Organisation {
+export interface BaseRecord {
   id: string
-  name: string
-  logoUrl: string | null
-  niceicNumber: string | null
-  address: string
-  createdAt: string // ISO timestamp
+  createdAt?: string
 }
 
-export interface CreateOrganisationInput {
-  name: string
-  logoUrl?: string
+// ============================================================================
+// USER
+// ============================================================================
+
+export interface User extends BaseRecord {
+  clerkId: string
+  email: string
+  fullName: string
+  companyName?: string
   niceicNumber?: string
-  address: string
-}
-
-// ============================================================================
-// WORKER
-// ============================================================================
-
-export interface Worker {
-  id: string
-  orgId: string
-  name: string
-  email: string
-  jibCardNumber: string | null
-  qualifications: string[]
-  createdAt: string
-}
-
-export interface CreateWorkerInput {
-  name: string
-  email: string
-  jibCardNumber?: string
-  qualifications?: string[]
+  phone?: string
+  subscriptionStatus: 'free' | 'pro' | 'enterprise'
+  stripeCustomerId?: string
+  lastLogin?: string
 }
 
 // ============================================================================
 // JOB
 // ============================================================================
 
-export type JobStatus = 'active' | 'completed' | 'archived'
+export type JobStatus = 'draft' | 'in_progress' | 'completed' | 'archived'
 
-export interface Job {
-  id: string
-  orgId: string
+export interface Job extends BaseRecord {
+  userId: string
+  title: string
   address: string
+  postcode: string
   clientName: string
-  startDate: string // ISO date (YYYY-MM-DD)
+  clientPhone?: string
+  clientEmail?: string
   status: JobStatus
-  equipmentId: string | null // EquipSafety link
-  createdAt: string
-  // Computed fields (from queries)
+  startDate: string
+  completionDate?: string
+  notes?: string
+  // Computed
   taskCount?: number
   evidenceCount?: number
-  completedEvidenceCount?: number
+  completedTaskCount?: number
 }
 
 export interface CreateJobInput {
+  title: string
   address: string
+  postcode: string
   clientName: string
+  clientPhone?: string
+  clientEmail?: string
   startDate: string
-  equipmentId?: string
+  notes?: string
 }
 
 export interface UpdateJobInput {
+  title?: string
   address?: string
+  postcode?: string
   clientName?: string
-  startDate?: string
+  clientPhone?: string
+  clientEmail?: string
   status?: JobStatus
-  equipmentId?: string
+  completionDate?: string
+  notes?: string
 }
 
 // ============================================================================
@@ -173,23 +167,37 @@ export type EvidenceType =
   | 'additional_evidence'
 
 // ============================================================================
+// PHOTO STAGE - When the photo was taken
+// ============================================================================
+
+export type PhotoStage = 'before' | 'during' | 'after'
+
+export const PHOTO_STAGE_LABELS: Record<PhotoStage, string> = {
+  before: 'Before',
+  during: 'During',
+  after: 'After'
+}
+
+export const PHOTO_STAGE_COLORS: Record<PhotoStage, string> = {
+  before: 'bg-amber-100 text-amber-800 border-amber-300',
+  during: 'bg-blue-100 text-blue-800 border-blue-300',
+  after: 'bg-green-100 text-green-800 border-green-300'
+}
+
+// ============================================================================
 // TASK
 // ============================================================================
 
 export type TaskStatus = 'pending' | 'in_progress' | 'complete' | 'signed_off'
 
-export interface Task {
-  id: string
+export interface Task extends BaseRecord {
   jobId: string
   taskType: TaskType
-  workerId: string
   status: TaskStatus
-  startedAt: string | null
-  completedAt: string | null
-  signedOffAt: string | null
-  signedOffBy: string | null
-  notes: string | null
-  createdAt: string
+  order?: number
+  notes?: string
+  startedAt?: string
+  completedAt?: string
   // Computed
   evidenceCount?: number
   requiredEvidenceCount?: number
@@ -198,96 +206,119 @@ export interface Task {
 export interface CreateTaskInput {
   jobId: string
   taskType: TaskType
-  workerId: string
+  order?: number
   notes?: string
 }
 
 export interface UpdateTaskInput {
   status?: TaskStatus
   notes?: string
-  signedOffBy?: string
+  startedAt?: string
+  completedAt?: string
 }
 
 // ============================================================================
 // EVIDENCE
 // ============================================================================
 
-export type SyncStatus = 'pending' | 'uploading' | 'synced' | 'failed'
-export type VerificationStatus = 'pending' | 'verified' | 'hash_mismatch'
-
-export interface Evidence {
-  id: string
+export interface Evidence extends BaseRecord {
   taskId: string
   evidenceType: EvidenceType
-  photoUrl: string | null // null until synced
-  photoBytesHash: string // SHA-256 hash
-  capturedAt: string // Device timestamp when taken
-  capturedLat: number | null
-  capturedLng: number | null
-  syncedAt: string | null // When uploaded to server
-  workerId: string
-  deviceId: string
-  syncStatus: SyncStatus
-  verificationStatus: VerificationStatus
-  createdAt: string
+  photoStage?: PhotoStage  // NEW: before, during, after
+  photoUrl: string
+  photoHash: string
+  latitude?: number
+  longitude?: number
+  gpsAccuracy?: number
+  capturedAt: string
+  syncedAt?: string
+  isSynced: boolean
+  notes?: string
 }
 
 export interface CreateEvidenceInput {
   taskId: string
   evidenceType: EvidenceType
-  photoBlob: Blob // Local storage before upload
+  photoStage?: PhotoStage  // NEW
+  photoUrl: string
+  photoHash: string
+  latitude?: number
+  longitude?: number
+  gpsAccuracy?: number
   capturedAt: string
-  capturedLat: number | null
-  capturedLng: number | null
-  workerId: string
-  deviceId: string
-}
-
-// Local-only evidence (before sync)
-export interface LocalEvidence extends Omit<Evidence, 'photoUrl' | 'syncedAt' | 'verificationStatus'> {
-  photoBlob: Blob
-  photoUrl: null
-  syncedAt: null
-  verificationStatus: 'pending'
+  notes?: string
 }
 
 // ============================================================================
 // AUDIT PACK
 // ============================================================================
 
-export interface AuditPack {
-  id: string
-  orgId: string
+export interface AuditPack extends BaseRecord {
+  jobId: string
   generatedAt: string
-  dateRangeStart: string
-  dateRangeEnd: string
-  filtersApplied: AuditPackFilters
-  pdfUrl: string | null
-  jobsIncluded: string[]
-  createdAt: string
-}
-
-export interface AuditPackFilters {
-  taskTypes?: TaskType[]
-  workerIds?: string[]
-  siteAddresses?: string[]
-  equipmentIds?: string[]
-}
-
-export interface CreateAuditPackInput {
-  dateRangeStart: string
-  dateRangeEnd: string
-  filters?: AuditPackFilters
+  pdfUrl?: string
+  evidenceCount: number
+  hash: string
+  downloadedAt?: string
 }
 
 // ============================================================================
-// EQUIPMENTS SAFETY INTEGRATION
+// EVIDENCE TYPE LABELS
 // ============================================================================
 
-export interface EquipmentLink {
-  equipmentId: string
-  equipmentName: string
-  equipmentType: string
-  lastTestDate: string | null
-  nextTestDue: string | null
+export const EVIDENCE_TYPE_LABELS: Record<EvidenceType, string> = {
+  // Consumer Unit
+  existing_board_condition: 'Existing Board Condition',
+  isolation_confirmation: 'Isolation Confirmation',
+  new_board_installed: 'New Board Installed',
+  main_earth_bonding: 'Main Earth Bonding',
+  test_meter_readings: 'Test Meter Readings',
+  completed_installation: 'Completed Installation',
+  certificate_photo: 'Certificate Photo',
+  // EICR
+  db_photo: 'Distribution Board',
+  sample_circuit_tests: 'Sample Circuit Tests',
+  defects_found: 'Defects Found',
+  test_instrument_calibration: 'Test Instrument Calibration',
+  // General
+  cable_route: 'Cable Route',
+  containment: 'Containment',
+  connection_points: 'Connection Points',
+  labelling: 'Labelling',
+  // Emergency Lighting
+  luminaire_photo: 'Luminaire Photo',
+  battery_test_readings: 'Battery Test Readings',
+  logbook_entry: 'Logbook Entry',
+  // Fire Alarm
+  panel_photo: 'Panel Photo',
+  device_test_log: 'Device Test Log',
+  call_point_activation: 'Call Point Activation',
+  // EV Charger
+  location_photo: 'Location Photo',
+  earthing_arrangement: 'Earthing Arrangement',
+  protective_device: 'Protective Device',
+  dno_notification: 'DNO Notification',
+  // Fault Finding
+  initial_fault_indication: 'Initial Fault Indication',
+  investigation_photos: 'Investigation Photos',
+  resolution: 'Resolution',
+  test_confirmation: 'Test Confirmation',
+  // PAT
+  equipment_photo: 'Equipment Photo',
+  label_applied: 'Label Applied',
+  test_result: 'Test Result',
+  // Smoke/CO
+  location_compliance: 'Location Compliance',
+  alarm_photo: 'Alarm Photo',
+  test_activation: 'Test Activation',
+  // Solar
+  array_location: 'Array Location',
+  inverter: 'Inverter',
+  ac_dc_isolators: 'AC/DC Isolators',
+  g98_g99_submission: 'G98/G99 Submission',
+  dno_acceptance: 'DNO Acceptance',
+  // General
+  before_photo: 'Before Photo',
+  after_photo: 'After Photo',
+  additional_evidence: 'Additional Evidence'
 }
