@@ -8,6 +8,7 @@ import {
 } from '../lib/smartsuite-fields.js'
 import { authMiddleware, getAuth } from '../middleware/auth.js'
 import { rateLimitMiddleware } from '../middleware/rateLimit.js'
+import { cacheGet, cacheSet, CACHE_KEYS, CACHE_TTL } from '../lib/redis.js'
 import type { Task, Job, User } from '../types/index.js'
 
 const tasks = new Hono()
@@ -15,10 +16,6 @@ const tasks = new Hono()
 // Apply middleware to all routes
 tasks.use('*', rateLimitMiddleware)
 tasks.use('*', authMiddleware)
-
-// Simple in-memory cache for user record IDs (clerk_id -> smartsuite_id)
-const userIdCache = new Map<string, { id: string; timestamp: number }>()
-const USER_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
 // Helper: Retry wrapper for SmartSuite calls
 async function withRetry<T>(
@@ -41,14 +38,17 @@ async function withRetry<T>(
   throw lastError
 }
 
-// Helper: Get user record ID from Clerk ID (with caching)
+// Helper: Get user record ID from Clerk ID (with Redis + memory caching)
 async function getUserRecordId(clerkId: string): Promise<string | null> {
-  // Check cache first
-  const cached = userIdCache.get(clerkId)
-  if (cached && Date.now() - cached.timestamp < USER_CACHE_TTL) {
-    return cached.id
+  const cacheKey = CACHE_KEYS.userRecord(clerkId)
+  
+  // 1. Try Redis cache first
+  const cached = await cacheGet<string>(cacheKey)
+  if (cached) {
+    return cached
   }
   
+  // 2. Cache miss - fetch from SmartSuite
   const client = getSmartSuiteClient()
   
   try {
@@ -57,7 +57,8 @@ async function getUserRecordId(clerkId: string): Promise<string | null> {
     )
     
     if (user?.id) {
-      userIdCache.set(clerkId, { id: user.id, timestamp: Date.now() })
+      // 3. Store in Redis (fire-and-forget)
+      cacheSet(cacheKey, user.id, CACHE_TTL.userRecord)
       return user.id
     }
     return null
@@ -86,11 +87,10 @@ function userOwnsJob(job: Record<string, unknown>, userRecordId: string): boolea
   return isOwner
 }
 
-// Helper: Verify user owns the job
+// Helper: Verify user owns the job (with caching)
 async function verifyJobOwnership(jobId: string, clerkId: string): Promise<boolean> {
   console.log('[TASKS] verifyJobOwnership called - jobId:', jobId, 'clerkId:', clerkId)
   
-  const client = getSmartSuiteClient()
   const userRecordId = await getUserRecordId(clerkId)
   
   if (!userRecordId) {
@@ -98,13 +98,28 @@ async function verifyJobOwnership(jobId: string, clerkId: string): Promise<boole
     return false
   }
 
+  // Check ownership cache
+  const ownershipKey = CACHE_KEYS.jobOwnership(jobId, userRecordId)
+  const cachedOwnership = await cacheGet<boolean>(ownershipKey)
+  if (cachedOwnership !== null) {
+    console.log('[TASKS] Ownership from cache:', cachedOwnership)
+    return cachedOwnership
+  }
+
+  const client = getSmartSuiteClient()
+
   try {
     const job = await withRetry(() => 
       client.getRecord<Job>(TABLES.JOBS, jobId)
     )
     
     console.log('[TASKS] Fetched job for ownership check')
-    return userOwnsJob(job as unknown as Record<string, unknown>, userRecordId)
+    const isOwner = userOwnsJob(job as unknown as Record<string, unknown>, userRecordId)
+    
+    // Cache ownership result (fire-and-forget)
+    cacheSet(ownershipKey, isOwner, CACHE_TTL.jobOwnership)
+    
+    return isOwner
   } catch (error) {
     console.error('[TASKS] Error fetching job for ownership:', error)
     return false
@@ -123,14 +138,12 @@ function taskBelongsToJob(task: Record<string, unknown>, jobId: string): boolean
 function extractStatus(statusValue: unknown): string {
   if (!statusValue) return 'pending'
   
-  // If it's an object with a label property
   if (typeof statusValue === 'object' && statusValue !== null) {
     const obj = statusValue as Record<string, unknown>
     if (obj.label && typeof obj.label === 'string') {
       return obj.label.toLowerCase().replace(/\s+/g, '_')
     }
     if (obj.value && typeof obj.value === 'string') {
-      // Check if value looks like a field ID (5-6 char alphanumeric)
       if (/^[a-zA-Z0-9]{5,6}$/.test(obj.value)) {
         return 'pending'
       }
@@ -138,9 +151,7 @@ function extractStatus(statusValue: unknown): string {
     }
   }
   
-  // If it's a string
   if (typeof statusValue === 'string') {
-    // Check if it looks like a SmartSuite field ID
     if (/^[a-zA-Z0-9]{5,6}$/.test(statusValue)) {
       return 'pending'
     }
@@ -248,12 +259,10 @@ function extractSingleSelectValue(
 
   if (!rawValue) return null
 
-  // Check if it's an option ID that needs mapping
   if (optionMap && optionMap[rawValue]) {
     return optionMap[rawValue].toLowerCase().replace(/\s+/g, '_')
   }
 
-  // If it looks like an option ID but we don't have mapping, log it
   if (/^[a-zA-Z0-9]{5,6}$/.test(rawValue)) {
     console.log('[TASKS] Unknown option ID:', rawValue, '- please add to mapping')
     return null
@@ -390,7 +399,7 @@ tasks.get('/:id/with-evidence', async (c) => {
       return c.json({ error: 'Task has no associated job' }, 400)
     }
 
-    // 2. Verify ownership ONCE
+    // 2. Verify ownership ONCE (uses cache)
     const isOwner = await verifyJobOwnership(jobId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
