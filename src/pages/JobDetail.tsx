@@ -18,6 +18,7 @@ import {
   Archive,
   AlertCircle,
   RefreshCw,
+  Plus,
 } from 'lucide-react'
 import { getTaskTypeConfig } from '../types/taskConfigs'
 import { trackPageView, trackError } from '../utils/analytics'
@@ -364,7 +365,16 @@ export default function JobDetail() {
 
         {/* Tasks Section */}
         <div>
-          <h2 className="font-semibold text-gray-900 mb-3">Tasks</h2>
+  <div className="flex items-center justify-between mb-3">
+    <h2 className="font-semibold text-gray-900">Tasks</h2>
+    <Link
+      to={`/jobs/${jobId}/add-tasks`}
+      className="flex items-center gap-1 text-sm text-green-600 font-medium hover:text-green-700"
+    >
+      <Plus className="w-4 h-4" />
+      Add Tasks
+    </Link>
+  </div>
 
           {tasks.length === 0 ? (
             <div className="card text-center py-8">
