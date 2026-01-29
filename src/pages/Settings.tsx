@@ -26,7 +26,7 @@ interface SettingsLink {
 }
 
 export default function Settings() {
-  const { getToken } = useAuth()
+  const { } = useAuth()
   const [storageUsed, setStorageUsed] = useState(0)
   const [storageQuota, setStorageQuota] = useState(0)
   const [pendingSync, setPendingSync] = useState(0)
