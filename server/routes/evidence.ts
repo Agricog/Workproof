@@ -3,11 +3,7 @@ import { getSmartSuiteClient, TABLES } from '../lib/smartsuite.js'
 import { USER_FIELDS, TASK_FIELDS, JOB_FIELDS, EVIDENCE_FIELDS } from '../lib/smartsuite-fields.js'
 import { authMiddleware, getAuth } from '../middleware/auth.js'
 import { rateLimitMiddleware } from '../middleware/rateLimit.js'
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand
-} from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import type { Evidence, Task, Job, User } from '../types/index.js'
 
