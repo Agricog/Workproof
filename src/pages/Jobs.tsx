@@ -19,6 +19,8 @@ import {
   AlertCircle,
   RefreshCw,
   Trash2,
+  FileEdit,
+  Play,
 } from 'lucide-react'
 import { trackPageView, trackError } from '../utils/analytics'
 import { jobsApi } from '../services/api'
@@ -26,7 +28,9 @@ import { captureError } from '../utils/errorTracking'
 import type { Job, JobStatus } from '../types/models'
 
 const STATUS_CONFIG: Record<JobStatus, { label: string; color: string; icon: typeof Clock }> = {
+  draft: { label: 'Draft', color: 'gray', icon: FileEdit },
   active: { label: 'Active', color: 'green', icon: Clock },
+  in_progress: { label: 'In Progress', color: 'amber', icon: Play },
   completed: { label: 'Completed', color: 'blue', icon: CheckCircle },
   archived: { label: 'Archived', color: 'gray', icon: Archive },
 }
@@ -305,9 +309,9 @@ export default function Jobs() {
                       <div className="flex items-center gap-2">
                         <div className="text-right">
                           <p className="text-sm font-medium text-gray-900">
-                            {job.evidenceCount || 0}/{job.completedEvidenceCount || 0}
+                            {job.evidenceCount || 0}
                           </p>
-                          <p className="text-xs text-gray-500">evidence</p>
+                          <p className="text-xs text-gray-500">photos</p>
                         </div>
                         <ChevronRight className="w-5 h-5 text-gray-400" aria-hidden="true" />
                       </div>
