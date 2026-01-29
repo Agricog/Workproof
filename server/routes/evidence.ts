@@ -293,12 +293,16 @@ evidence.get('/', async (c) => {
 })
 
 // Get evidence counts by job
-evidence.get('/counts-by-job/:jobId', async (c) => {
+evidence.get('/counts-by-job', async (c) => {
   const auth = getAuth(c)
-  const jobId = c.req.param('jobId')
+  const jobId = c.req.query('job_id')
   const client = getSmartSuiteClient()
 
-  console.log('[EVIDENCE] GET /counts-by-job/:jobId called - jobId:', jobId)
+  console.log('[EVIDENCE] GET /counts-by-job called - jobId:', jobId)
+
+  if (!jobId) {
+    return c.json({ error: 'Missing job_id parameter' }, 400)
+  }
 
   try {
     // Get user record ID for ownership check
