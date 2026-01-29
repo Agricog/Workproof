@@ -16,6 +16,10 @@ evidence.use('*', authMiddleware)
 // R2 Configuration
 const R2_BUCKET = process.env.R2_BUCKET_NAME || 'workproof-evidence'
 
+// Simple in-memory cache for user record IDs (clerk_id -> smartsuite_id)
+const userIdCache = new Map<string, { id: string; timestamp: number }>()
+const USER_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+
 // Initialize S3 client for R2
 function getR2Client() {
   return new S3Client({
@@ -56,15 +60,26 @@ async function withRetry<T>(
   throw lastError
 }
 
-// Helper: Get user record ID from Clerk ID
+// Helper: Get user record ID from Clerk ID (with caching)
 async function getUserRecordId(clerkId: string): Promise<string | null> {
+  // Check cache first
+  const cached = userIdCache.get(clerkId)
+  if (cached && Date.now() - cached.timestamp < USER_CACHE_TTL) {
+    return cached.id
+  }
+  
   const client = getSmartSuiteClient()
   
   try {
     const user = await withRetry(() => 
       client.findByField<User>(TABLES.USERS, USER_FIELDS.clerk_id, clerkId)
     )
-    return user?.id || null
+    
+    if (user?.id) {
+      userIdCache.set(clerkId, { id: user.id, timestamp: Date.now() })
+      return user.id
+    }
+    return null
   } catch (error) {
     console.error('[EVIDENCE] Error finding user:', error)
     return null
