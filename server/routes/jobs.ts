@@ -89,6 +89,11 @@ jobs.get('/', async (c) => {
     const result = await client.listRecords<Job>(TABLES.JOBS, {
       limit: 100
     })
+    // DEBUG: Log first job's status to see format
+    if (result.items.length > 0) {
+      const firstJob = result.items[0] as unknown as Record<string, unknown>
+      console.log('DEBUG job status field:', JSON.stringify(firstJob[JOB_FIELDS.status]))
+    }
 
     // Filter by user ownership in memory
     let filteredItems = result.items.filter(item => 
