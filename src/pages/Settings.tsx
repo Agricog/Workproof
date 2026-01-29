@@ -26,7 +26,7 @@ interface SettingsLink {
 }
 
 export default function Settings() {
-  const { } = useAuth()
+  const { getToken } = useAuth()
   const [storageUsed, setStorageUsed] = useState(0)
   const [storageQuota, setStorageQuota] = useState(0)
   const [pendingSync, setPendingSync] = useState(0)
@@ -52,7 +52,7 @@ export default function Settings() {
   const handleSync = async () => {
     setIsSyncing(true)
     try {
-      const result = await forceSyncNow()
+      const result = await forceSyncNow(getToken)
       await loadSyncStatus()
       if (result.synced > 0) {
         trackEvidenceSynced(result.synced)
