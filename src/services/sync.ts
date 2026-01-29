@@ -1,6 +1,9 @@
 /**
  * WorkProof Sync Service
  * Background sync for offline evidence with photo stage support
+ * 
+ * Security: Uses Clerk token getter for authenticated API calls
+ * Tokens are fetched fresh for each sync to handle expiration
  */
 import {
   getSyncQueue,
@@ -13,22 +16,44 @@ import {
 import { evidenceApi } from './api'
 import { captureSyncError } from '../utils/errorTracking'
 
+// ============================================================================
+// TYPES
+// ============================================================================
+
+/** Function type for getting auth token from Clerk */
+type GetTokenFn = () => Promise<string | null>
+
+// ============================================================================
+// MODULE STATE
+// ============================================================================
+
 const MAX_RETRY_ATTEMPTS = 5
 const SYNC_INTERVAL_MS = 60 * 1000 // 1 minute
 
 let syncInProgress = false
 let syncIntervalId: ReturnType<typeof setInterval> | null = null
 
+/** Stored reference to Clerk's getToken function */
+let tokenGetter: GetTokenFn | null = null
+
+// ============================================================================
+// SERVICE LIFECYCLE
+// ============================================================================
+
 /**
  * Start the background sync service
+ * @param getToken - Clerk's getToken function for authenticated API calls
  */
-export function startSyncService(): void {
+export function startSyncService(getToken: GetTokenFn): void {
   if (syncIntervalId) {
     return // Already running
   }
 
-  // Initial sync
-  triggerSync()
+  // Store token getter for use in sync operations
+  tokenGetter = getToken
+
+  // Initial sync after short delay to let auth settle
+  setTimeout(() => triggerSync(), 2000)
 
   // Set up interval
   syncIntervalId = setInterval(() => {
@@ -42,6 +67,8 @@ export function startSyncService(): void {
 
   // Listen for manual sync trigger
   window.addEventListener('workproof:sync', () => triggerSync())
+
+  console.log('Sync service started')
 }
 
 /**
@@ -53,6 +80,8 @@ export function stopSyncService(): void {
     syncIntervalId = null
   }
   window.removeEventListener('online', handleOnline)
+  tokenGetter = null
+  console.log('Sync service stopped')
 }
 
 /**
@@ -61,6 +90,28 @@ export function stopSyncService(): void {
 function handleOnline(): void {
   console.log('Back online - triggering sync')
   triggerSync()
+}
+
+// ============================================================================
+// SYNC OPERATIONS
+// ============================================================================
+
+/**
+ * Get fresh auth token
+ * @returns Promise resolving to token or null if unavailable
+ */
+async function getAuthToken(): Promise<string | null> {
+  if (!tokenGetter) {
+    console.warn('Sync: No token getter available')
+    return null
+  }
+
+  try {
+    return await tokenGetter()
+  } catch (error) {
+    captureSyncError(error, 'getAuthToken')
+    return null
+  }
 }
 
 /**
@@ -74,11 +125,18 @@ export async function triggerSync(): Promise<void> {
   syncInProgress = true
 
   try {
+    // Get fresh token for this sync cycle
+    const token = await getAuthToken()
+    if (!token) {
+      console.log('Sync: No auth token available, skipping')
+      return
+    }
+
     // Sync evidence first
-    await syncEvidence()
+    await syncEvidence(token)
 
     // Then process queue
-    await processQueue()
+    await processQueue(token)
   } catch (error) {
     captureSyncError(error, 'triggerSync')
   } finally {
@@ -88,8 +146,9 @@ export async function triggerSync(): Promise<void> {
 
 /**
  * Sync unsynced evidence to server
+ * @param token - Auth token for API calls
  */
-async function syncEvidence(): Promise<void> {
+async function syncEvidence(token: string): Promise<void> {
   const unsyncedItems = await getUnsyncedEvidence()
 
   if (unsyncedItems.length === 0) {
@@ -102,18 +161,22 @@ async function syncEvidence(): Promise<void> {
     if (!item) continue
 
     try {
-      // Upload evidence with stage support
-      const response = await evidenceApi.upload(item.taskId, {
-        evidenceType: item.evidenceType,
-        photoStage: item.photoStage || undefined,  // NEW: Include photo stage
-        photoData: item.photoData,
-        thumbnailData: item.thumbnailData,
-        hash: item.hash,
-        capturedAt: item.capturedAt,
-        latitude: item.latitude,
-        longitude: item.longitude,
-        accuracy: item.accuracy,
-      })
+      // Upload evidence with auth token
+      const response = await evidenceApi.upload(
+        item.taskId,
+        {
+          evidenceType: item.evidenceType,
+          photoStage: item.photoStage || undefined,
+          photoData: item.photoData,
+          thumbnailData: item.thumbnailData,
+          hash: item.hash,
+          capturedAt: item.capturedAt,
+          latitude: item.latitude,
+          longitude: item.longitude,
+          accuracy: item.accuracy,
+        },
+        token
+      )
 
       if (response.data) {
         await markEvidenceSynced(item.id)
@@ -129,8 +192,9 @@ async function syncEvidence(): Promise<void> {
 
 /**
  * Process sync queue items
+ * @param token - Auth token for API calls
  */
-async function processQueue(): Promise<void> {
+async function processQueue(token: string): Promise<void> {
   const queue = await getSyncQueue()
 
   if (queue.length === 0) {
@@ -151,13 +215,13 @@ async function processQueue(): Promise<void> {
 
       switch (item.type) {
         case 'evidence':
-          success = await processEvidenceSync(item)
+          success = await processEvidenceSync(item, token)
           break
         case 'job':
-          success = await processJobSync(item)
+          success = await processJobSync(item, token)
           break
         case 'task':
-          success = await processTaskSync(item)
+          success = await processTaskSync(item, token)
           break
         default:
           console.warn(`Unknown sync type: ${item.type}`)
@@ -178,56 +242,51 @@ async function processQueue(): Promise<void> {
 
 /**
  * Process evidence sync item
+ * @param item - Queue item to process
+ * @param token - Auth token for API calls
  */
-async function processEvidenceSync(item: SyncQueueItem): Promise<boolean> {
-  // Cast item data to expected shape
-  const data = item as unknown as {
-    entityId: string
-    data: {
-      evidenceType: string
-      photoStage?: string
-      photoData: string
-      thumbnailData: string
-      hash: string
-      capturedAt: string
-      latitude: number | null
-      longitude: number | null
-      accuracy: number | null
-    }
-  }
-  
-  const response = await evidenceApi.upload(data.entityId, {
-    evidenceType: data.data.evidenceType,
-    photoStage: data.data.photoStage,
-    photoData: data.data.photoData,
-    thumbnailData: data.data.thumbnailData,
-    hash: data.data.hash,
-    capturedAt: data.data.capturedAt,
-    latitude: data.data.latitude,
-    longitude: data.data.longitude,
-    accuracy: data.data.accuracy,
-  })
+async function processEvidenceSync(item: SyncQueueItem, token: string): Promise<boolean> {
+  const taskId = String(item.id || '')
+  const data = item.data || {}
+
+  const response = await evidenceApi.upload(
+    taskId,
+    {
+      evidenceType: String(data.evidenceType || ''),
+      photoStage: data.photoStage ? String(data.photoStage) : undefined,
+      photoData: String(data.photoData || ''),
+      thumbnailData: String(data.thumbnailData || ''),
+      hash: String(data.hash || ''),
+      capturedAt: String(data.capturedAt || ''),
+      latitude: typeof data.latitude === 'number' ? data.latitude : null,
+      longitude: typeof data.longitude === 'number' ? data.longitude : null,
+      accuracy: typeof data.accuracy === 'number' ? data.accuracy : null,
+    },
+    token
+  )
 
   return !!response.data && !response.error
 }
 
 /**
- * Process job sync item
+ * Process job sync item (placeholder)
  */
-async function processJobSync(item: SyncQueueItem): Promise<boolean> {
+async function processJobSync(_item: SyncQueueItem, _token: string): Promise<boolean> {
   // TODO: Implement job sync when needed
-  console.log('Job sync not yet implemented', item)
   return true
 }
 
 /**
- * Process task sync item
+ * Process task sync item (placeholder)
  */
-async function processTaskSync(item: SyncQueueItem): Promise<boolean> {
+async function processTaskSync(_item: SyncQueueItem, _token: string): Promise<boolean> {
   // TODO: Implement task sync when needed
-  console.log('Task sync not yet implemented', item)
   return true
 }
+
+// ============================================================================
+// PUBLIC API
+// ============================================================================
 
 /**
  * Get sync status
@@ -250,7 +309,8 @@ export async function getSyncStatus(): Promise<{
 }
 
 /**
- * Force sync now (for manual trigger)
+ * Force sync now (for manual trigger from Settings)
+ * @returns Sync result with counts
  */
 export async function forceSyncNow(): Promise<{
   success: boolean
@@ -258,6 +318,12 @@ export async function forceSyncNow(): Promise<{
   failed: number
 }> {
   if (!navigator.onLine) {
+    return { success: false, synced: 0, failed: 0 }
+  }
+
+  // Get fresh token
+  const token = await getAuthToken()
+  if (!token) {
     return { success: false, synced: 0, failed: 0 }
   }
 
@@ -273,17 +339,21 @@ export async function forceSyncNow(): Promise<{
       if (!item) continue
 
       try {
-        const response = await evidenceApi.upload(item.taskId, {
-          evidenceType: item.evidenceType,
-          photoStage: item.photoStage || undefined,  // NEW: Include photo stage
-          photoData: item.photoData,
-          thumbnailData: item.thumbnailData,
-          hash: item.hash,
-          capturedAt: item.capturedAt,
-          latitude: item.latitude,
-          longitude: item.longitude,
-          accuracy: item.accuracy,
-        })
+        const response = await evidenceApi.upload(
+          item.taskId,
+          {
+            evidenceType: item.evidenceType,
+            photoStage: item.photoStage || undefined,
+            photoData: item.photoData,
+            thumbnailData: item.thumbnailData,
+            hash: item.hash,
+            capturedAt: item.capturedAt,
+            latitude: item.latitude,
+            longitude: item.longitude,
+            accuracy: item.accuracy,
+          },
+          token
+        )
 
         if (response.data) {
           await markEvidenceSynced(item.id)
