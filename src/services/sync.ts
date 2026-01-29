@@ -130,7 +130,7 @@ async function syncEvidence(token: string): Promise<void> {
         item.taskId,
         {
           evidenceType: item.evidenceType,
-          photoStage: item.photoStage,
+          photoStage: item.photoStage || undefined,
           photoData: item.photoData,
           thumbnailData: item.thumbnailData,
           hash: item.hash,
@@ -319,7 +319,7 @@ export async function forceSyncNow(
           item.taskId,
           {
             evidenceType: item.evidenceType,
-            photoStage: item.photoStage,
+            photoStage: item.photoStage || undefined,
             photoData: item.photoData,
             thumbnailData: item.thumbnailData,
             hash: item.hash,
