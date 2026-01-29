@@ -11,12 +11,12 @@ const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Jobs = lazy(() => import('./pages/Jobs'))
 const NewJob = lazy(() => import('./pages/NewJob'))
 const JobDetail = lazy(() => import('./pages/JobDetail'))
+const AddTasks = lazy(() => import('./pages/AddTasks'))
 const TaskDetail = lazy(() => import('./pages/TaskDetail'))
 const AuditPacks = lazy(() => import('./pages/AuditPacks'))
 const Packs = lazy(() => import('./pages/Packs'))
 const PackPreview = lazy(() => import('./pages/PackPreview'))
 const Settings = lazy(() => import('./pages/Settings'))
-const AddTasks = lazy(() => import('./pages/AddTasks'))
 
 // Loading spinner
 function LoadingSpinner() {
@@ -34,6 +34,7 @@ function SyncServiceInit() {
   useEffect(() => {
     // Start sync service with token getter
     startSyncService(getToken)
+
     return () => {
       stopSyncService()
     }
@@ -92,6 +93,14 @@ export default function App() {
               element={
                 <Layout>
                   <JobDetail />
+                </Layout>
+              }
+            />
+            <Route
+              path="/jobs/:jobId/add-tasks"
+              element={
+                <Layout>
+                  <AddTasks />
                 </Layout>
               }
             />
@@ -194,6 +203,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <JobDetail />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/jobs/:jobId/add-tasks"
+              element={
+                <ProtectedRoute>
+                  <AddTasks />
                 </ProtectedRoute>
               }
             />
