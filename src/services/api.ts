@@ -193,6 +193,7 @@ export const evidenceApi = {
     task_id: string
     evidence_type: string
     photo_stage?: string
+    notes?: string
     photo_url: string
     photo_hash: string
     latitude?: number | null
@@ -221,6 +222,7 @@ export const evidenceApi = {
     data: {
       evidenceType: string
       photoStage?: string
+      notes?: string
       photoData: string
       thumbnailData: string
       hash: string
@@ -265,11 +267,12 @@ export const evidenceApi = {
         }
       }
       
-      // 5. Create evidence record with photo_stage
+      // 5. Create evidence record with photo_stage and notes
       return evidenceApi.create({
         task_id: taskId,
         evidence_type: data.evidenceType,
         photo_stage: data.photoStage,
+        notes: data.notes,
         photo_url: uploadUrlResult.data.photo_url,
         photo_hash: photoHash,
         latitude: data.latitude,
