@@ -1,24 +1,25 @@
 /**
  * WorkProof Photo Capture Component
- * Captures photos with GPS, timestamp, and hash for immutable evidence
+ * Captures photos with GPS, timestamp, hash, and photo stage for immutable evidence
  */
-
 import { useState, useEffect, useCallback } from 'react'
 import { Camera, X, RotateCcw, Check, MapPin, Clock, AlertCircle } from 'lucide-react'
 import { useCamera } from '../../hooks/useCamera'
-import { useGeolocation, formatCoordinates } from '../../hooks/useGeolocation'
+import { useGeolocation } from '../../hooks/useGeolocation'
 import { compressImage, generateThumbnail, blobToBase64 } from '../../utils/compression'
 import { generateEvidenceHash, generateId } from '../../utils/crypto'
 import { saveEvidence, isStorageNearLimit } from '../../utils/indexedDB'
 import { captureError } from '../../utils/errorTracking'
 import { trackEvidenceCaptured } from '../../utils/analytics'
-import type { EvidenceType } from '../../types/models'
+import type { EvidenceType, PhotoStage } from '../../types/models'
+import { PHOTO_STAGE_LABELS, PHOTO_STAGE_COLORS } from '../../types/models'
 import type { StoredEvidence } from '../../utils/indexedDB'
 
 interface PhotoCaptureProps {
   taskId: string
   jobId: string
   evidenceType: EvidenceType
+  photoStage?: PhotoStage
   workerId: string
   onCapture: (evidence: StoredEvidence) => void
   onCancel: () => void
@@ -29,6 +30,7 @@ export default function PhotoCapture({
   taskId,
   jobId,
   evidenceType,
+  photoStage,
   workerId,
   onCapture,
   onCancel,
@@ -123,6 +125,7 @@ export default function PhotoCapture({
         taskId,
         jobId,
         evidenceType,
+        photoStage: photoStage || null,  // NEW: Include photo stage
         photoData,
         thumbnailData,
         hash,
@@ -154,7 +157,7 @@ export default function PhotoCapture({
     } finally {
       setIsSaving(false)
     }
-  }, [capturedBlob, thumbnail, taskId, jobId, evidenceType, workerId, location, onCapture])
+  }, [capturedBlob, thumbnail, taskId, jobId, evidenceType, photoStage, workerId, location, onCapture])
 
   // Error state
   if (cameraError) {
@@ -188,9 +191,17 @@ export default function PhotoCapture({
         >
           <X className="w-6 h-6" />
         </button>
-        <span className="text-white font-medium text-sm truncate max-w-[200px]">
-          {label}
-        </span>
+        <div className="text-center">
+          <span className="text-white font-medium text-sm truncate max-w-[200px] block">
+            {label}
+          </span>
+          {/* Photo Stage Badge */}
+          {photoStage && (
+            <span className={`text-xs px-2 py-0.5 rounded-full mt-1 inline-block ${PHOTO_STAGE_COLORS[photoStage]}`}>
+              {PHOTO_STAGE_LABELS[photoStage]} Photo
+            </span>
+          )}
+        </div>
         <button
           onClick={switchCamera}
           className="p-2 text-white hover:bg-white/10 rounded-full transition-colors"
@@ -204,86 +215,89 @@ export default function PhotoCapture({
       <div className="flex-1 relative overflow-hidden">
         {!capturedBlob ? (
           <>
+            {/* Live camera */}
             <video
               ref={videoRef}
-              className="absolute inset-0 w-full h-full object-cover"
+              autoPlay
               playsInline
               muted
-              autoPlay
+              className="w-full h-full object-cover"
             />
             <canvas ref={canvasRef} className="hidden" />
+
+            {/* Camera overlay */}
+            {!isReady && (
+              <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+                <div className="text-white text-center">
+                  <div className="animate-spin w-8 h-8 border-2 border-white border-t-transparent rounded-full mx-auto mb-2" />
+                  <p>Starting camera...</p>
+                </div>
+              </div>
+            )}
           </>
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center bg-black">
-            {thumbnail && (
-              <img
-                src={thumbnail}
-                alt="Captured photo"
-                className="max-w-full max-h-full object-contain"
-              />
-            )}
-          </div>
-        )}
-
-        {/* Storage Warning */}
-        {storageWarning && (
-          <div className="absolute top-4 left-4 right-4 bg-amber-500 text-white px-4 py-2 rounded-lg text-sm flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            <span>Storage nearly full. Sync pending photos soon.</span>
-          </div>
+          /* Captured preview */
+          <img
+            src={thumbnail || ''}
+            alt="Captured photo"
+            className="w-full h-full object-cover"
+          />
         )}
       </div>
 
-      {/* Metadata Display */}
+      {/* GPS Status */}
       <div className="bg-gray-900/80 backdrop-blur-sm px-4 py-2">
-        <div className="flex items-center gap-4 text-xs text-gray-300">
+        <div className="flex items-center justify-center gap-4 text-sm">
           <div className="flex items-center gap-1">
-            <MapPin className="w-3 h-3" />
-            {geoLoading ? (
-              <span>Getting location...</span>
-            ) : geoError ? (
-              <span className="text-amber-400">Location unavailable</span>
-            ) : location ? (
-              <span>{formatCoordinates(location.latitude, location.longitude)}</span>
-            ) : (
-              <span>No location</span>
-            )}
+            <MapPin className={`w-4 h-4 ${location ? 'text-green-400' : 'text-gray-400'}`} />
+            <span className={location ? 'text-green-400' : 'text-gray-400'}>
+              {geoLoading ? 'Getting location...' : location ? 'GPS locked' : geoError || 'No GPS'}
+            </span>
           </div>
-          <div className="flex items-center gap-1">
-            <Clock className="w-3 h-3" />
-            <span>{new Date().toLocaleTimeString('en-GB')}</span>
+          <div className="flex items-center gap-1 text-gray-400">
+            <Clock className="w-4 h-4" />
+            <span>{new Date().toLocaleTimeString()}</span>
           </div>
         </div>
       </div>
 
+      {/* Storage warning */}
+      {storageWarning && (
+        <div className="bg-amber-500 text-white px-4 py-2 text-sm text-center">
+          Storage nearly full. Please sync your photos.
+        </div>
+      )}
+
+      {/* Save error */}
+      {saveError && (
+        <div className="bg-red-500 text-white px-4 py-2 text-sm text-center">
+          {saveError}
+        </div>
+      )}
+
       {/* Controls */}
       <div className="bg-gray-900 px-4 py-6 safe-area-bottom">
-        {saveError && (
-          <div className="mb-4 bg-red-500/20 border border-red-500/50 text-red-200 px-4 py-2 rounded-lg text-sm text-center">
-            {saveError}
-          </div>
-        )}
-
         {!capturedBlob ? (
-          <div className="flex justify-center">
-            <button
-              onClick={handleCapture}
-              disabled={!isReady || isCapturing}
-              className="w-20 h-20 bg-white rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform"
-              aria-label="Take photo"
-            >
-              <Camera className="w-8 h-8 text-gray-900" />
-            </button>
-          </div>
+          /* Capture button */
+          <button
+            onClick={handleCapture}
+            disabled={!isReady || isCapturing}
+            className="mx-auto block w-20 h-20 rounded-full border-4 border-white bg-white/20 
+              hover:bg-white/30 active:scale-95 transition-all disabled:opacity-50"
+            aria-label="Take photo"
+          >
+            <Camera className="w-8 h-8 text-white mx-auto" />
+          </button>
         ) : (
-          <div className="flex items-center justify-center gap-8">
+          /* Confirm/Retake buttons */
+          <div className="flex justify-center gap-8">
             <button
               onClick={handleRetake}
               disabled={isSaving}
               className="flex flex-col items-center gap-1 text-white disabled:opacity-50"
             >
-              <div className="w-14 h-14 bg-gray-700 rounded-full flex items-center justify-center">
-                <RotateCcw className="w-6 h-6" />
+              <div className="w-14 h-14 rounded-full bg-gray-700 flex items-center justify-center">
+                <X className="w-6 h-6" />
               </div>
               <span className="text-xs">Retake</span>
             </button>
@@ -293,9 +307,9 @@ export default function PhotoCapture({
               disabled={isSaving}
               className="flex flex-col items-center gap-1 text-white disabled:opacity-50"
             >
-              <div className="w-14 h-14 bg-green-600 rounded-full flex items-center justify-center">
+              <div className="w-14 h-14 rounded-full bg-green-600 flex items-center justify-center">
                 {isSaving ? (
-                  <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <div className="animate-spin w-6 h-6 border-2 border-white border-t-transparent rounded-full" />
                 ) : (
                   <Check className="w-6 h-6" />
                 )}
