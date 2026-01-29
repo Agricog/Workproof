@@ -41,7 +41,7 @@ export const TASK_FIELDS = {
 export const EVIDENCE_FIELDS = {
   task: 's9d23ccc51',
   evidence_type: 'sc1907f924',
-  photo_stage: 's15d91de07',  // NEW: before, during, after
+  photo_stage: 's15d91de07',
   photo_url: 'sed7082c34',
   photo_hash: 's8ef18ff24',
   latitude: 'sc08cda9ac',
