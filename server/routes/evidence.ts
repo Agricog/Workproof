@@ -7,11 +7,25 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import type { Evidence, Task, User } from '../types/index.js'
 
-// Add this mapping near the top of the file
+const evidence = new Hono()
+
+// Apply middleware to all routes
+evidence.use('*', rateLimitMiddleware)
+evidence.use('*', authMiddleware)
+
+// R2 Configuration
+const R2_BUCKET = process.env.R2_BUCKET_NAME || 'workproof-evidence'
+
+// Simple in-memory cache for user record IDs (clerk_id -> smartsuite_id)
+const userIdCache = new Map<string, { id: string; timestamp: number }>()
+const USER_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+
+// Map frontend evidence types to SmartSuite dropdown labels
 const EVIDENCE_TYPE_MAP: Record<string, string> = {
   'before_photo': 'Before Photo',
   'after_photo': 'After Photo',
   'meter_reading': 'Meter Reading',
+  'test_meter_readings': 'Meter Reading',
   'test_result': 'Test Result',
   'label_photo': 'Label Photo',
   'label_applied': 'Label Photo',
@@ -25,21 +39,20 @@ const EVIDENCE_TYPE_MAP: Record<string, string> = {
   'insulation_test_reading': 'Insulation Test Reading',
   'continuity_reading': 'Continuity Reading',
   'zs_reading': 'ZS Reading',
-  'equipment_photo': 'Before Photo',  // Map to closest match
+  'equipment_photo': 'Before Photo',
+  'completed_installation': 'After Photo',
+  'initial_fault_indication': 'Before Photo',
+  'investigation_photos': 'Before Photo',
+  'resolution': 'After Photo',
+  'test_confirmation': 'Test Result',
 }
 
-const evidence = new Hono()
-
-// Apply middleware to all routes
-evidence.use('*', rateLimitMiddleware)
-evidence.use('*', authMiddleware)
-
-// R2 Configuration
-const R2_BUCKET = process.env.R2_BUCKET_NAME || 'workproof-evidence'
-
-// Simple in-memory cache for user record IDs (clerk_id -> smartsuite_id)
-const userIdCache = new Map<string, { id: string; timestamp: number }>()
-const USER_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+// Map frontend photo stages to SmartSuite dropdown labels
+const PHOTO_STAGE_MAP: Record<string, string> = {
+  'before': 'Before',
+  'during': 'During',
+  'after': 'After',
+}
 
 // Initialize S3 client for R2
 function getR2Client() {
@@ -497,22 +510,20 @@ evidence.post('/', async (c) => {
 
     // Support both formats
     const taskId = (body.task_id || body.taskId) as string
-    const evidenceType = (body.evidence_type || body.evidenceType) as string
-    const photoStage = (body.photo_stage || body.photoStage) as string | undefined
+    const evidenceTypeRaw = (body.evidence_type || body.evidenceType) as string
+    const photoStageRaw = (body.photo_stage || body.photoStage) as string | undefined
     const photoUrl = (body.photo_url || body.photoUrl) as string
     const photoHash = (body.photo_hash || body.photoHash) as string
 
-    console.log('[EVIDENCE] Parsed fields:', { taskId, evidenceType, photoStage, photoUrl: photoUrl?.slice(0, 50) })
+    // Map to SmartSuite dropdown labels
+    const evidenceType = EVIDENCE_TYPE_MAP[evidenceTypeRaw] || evidenceTypeRaw
+    const photoStage = photoStageRaw ? (PHOTO_STAGE_MAP[photoStageRaw.toLowerCase()] || photoStageRaw) : undefined
+
+    console.log('[EVIDENCE] Parsed fields:', { taskId, evidenceTypeRaw, evidenceType, photoStageRaw, photoStage, photoUrl: photoUrl?.slice(0, 50) })
 
     // Validate required fields
-    if (!taskId || !evidenceType || !photoUrl) {
+    if (!taskId || !evidenceTypeRaw || !photoUrl) {
       return c.json({ error: 'Missing required fields: task_id, evidence_type, photo_url' }, 400)
-    }
-
-    // Validate photo_stage if provided
-    const validStages = ['before', 'during', 'after']
-    if (photoStage && !validStages.includes(photoStage.toLowerCase())) {
-      console.warn('[EVIDENCE] Invalid photo_stage:', photoStage)
     }
 
     // Verify ownership
@@ -524,7 +535,7 @@ evidence.post('/', async (c) => {
 
     // Build evidence data with SmartSuite field IDs
     const evidenceData: Record<string, unknown> = {
-      title: `${evidenceType} - ${Date.now()}`,
+      title: `${evidenceTypeRaw} - ${Date.now()}`,
       [EVIDENCE_FIELDS.task]: [taskId],
       [EVIDENCE_FIELDS.evidence_type]: evidenceType,
       [EVIDENCE_FIELDS.photo_url]: photoUrl,
@@ -536,8 +547,8 @@ evidence.post('/', async (c) => {
 
     // Add photo_stage if provided
     if (photoStage) {
-      evidenceData[EVIDENCE_FIELDS.photo_stage] = photoStage.toLowerCase()
-      console.log('[EVIDENCE] Adding photo_stage:', photoStage.toLowerCase())
+      evidenceData[EVIDENCE_FIELDS.photo_stage] = photoStage
+      console.log('[EVIDENCE] Adding photo_stage:', photoStage)
     }
 
     // Add optional GPS fields
