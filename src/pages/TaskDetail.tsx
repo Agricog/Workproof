@@ -1,8 +1,8 @@
 /**
  * WorkProof Task Detail
- * View task with evidence checklist and photo capture
+ * View task with evidence checklist and photo capture with stage selection
  */
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
 import { useAuth } from '@clerk/clerk-react'
@@ -11,7 +11,7 @@ import { getTaskTypeConfig } from '../types/taskConfigs'
 import { trackTaskStarted, trackTaskCompleted, trackError } from '../utils/analytics'
 import { captureError } from '../utils/errorTracking'
 import { tasksApi, evidenceApi } from '../services/api'
-import type { Task, TaskStatus, EvidenceType } from '../types/models'
+import type { Task, TaskStatus, EvidenceType, PhotoStage } from '../types/models'
 import type { StoredEvidence } from '../utils/indexedDB'
 import PhotoCapture from '../components/capture/PhotoCapture'
 import EvidenceChecklist from '../components/capture/EvidenceChecklist'
@@ -23,22 +23,25 @@ const TASK_STATUS_CONFIG: Record<TaskStatus, { label: string; color: string }> =
   signed_off: { label: 'Signed Off', color: 'green' },
 }
 
+// Captured evidence info including stage
+interface CapturedEvidenceInfo {
+  captured: boolean
+  stage?: PhotoStage
+}
+
 export default function TaskDetail() {
   const params = useParams<{ jobId: string; taskId: string }>()
   const jobId = params.jobId
   const taskId = params.taskId
   const navigate = useNavigate()
   const { getToken } = useAuth()
-
   const [task, setTask] = useState<Task | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showCamera, setShowCamera] = useState(false)
   const [selectedEvidenceType, setSelectedEvidenceType] = useState<EvidenceType | null>(null)
-  const [capturedEvidence, setCapturedEvidence] = useState<Record<string, boolean>>({})
-  
-  // Track locally captured evidence to prevent API overwrites
-  const localCapturesRef = useRef<Set<string>>(new Set())
+  const [selectedPhotoStage, setSelectedPhotoStage] = useState<PhotoStage | null>(null)
+  const [capturedEvidence, setCapturedEvidence] = useState<Record<string, CapturedEvidenceInfo>>({})
 
   useEffect(() => {
     loadTaskData()
@@ -55,7 +58,6 @@ export default function TaskDetail() {
 
       // Fetch task details
       const taskResponse = await tasksApi.get(taskId, token)
-
       if (taskResponse.error) {
         setError(taskResponse.error)
         trackError('api_error', 'task_detail_load')
@@ -66,61 +68,34 @@ export default function TaskDetail() {
         setTask(taskResponse.data)
 
         // Fetch existing evidence for this task
-        try {
-          const evidenceResponse = await evidenceApi.listByTask(taskId, token)
-          if (evidenceResponse.data) {
-            // Handle both array and paginated response
-            const evidenceData = evidenceResponse.data as unknown
-            let evidenceItems: Array<{ evidenceType?: string }> = []
-            
-            if (Array.isArray(evidenceData)) {
-              evidenceItems = evidenceData
-            } else if (evidenceData && typeof evidenceData === 'object' && 'items' in evidenceData) {
-              evidenceItems = (evidenceData as { items: Array<{ evidenceType?: string }> }).items || []
-            }
-            
-            // Build captured map from API
-            const apiCaptured: Record<string, boolean> = {}
-            evidenceItems.forEach((ev) => {
-              if (ev.evidenceType) {
-                apiCaptured[ev.evidenceType] = true
+        const evidenceResponse = await evidenceApi.listByTask(taskId, token)
+        if (evidenceResponse.data) {
+          // Mark captured evidence types with their stages
+          const captured: Record<string, CapturedEvidenceInfo> = {}
+          evidenceResponse.data.forEach((ev) => {
+            if (ev.evidenceType) {
+              captured[ev.evidenceType] = {
+                captured: true,
+                stage: ev.photoStage as PhotoStage | undefined
               }
-            })
-            
-            // Merge with local captures (local takes priority)
-            setCapturedEvidence(prev => {
-              const merged = { ...apiCaptured }
-              // Ensure all local captures are preserved
-              localCapturesRef.current.forEach(type => {
-                merged[type] = true
-              })
-              // Also preserve any existing state not in API yet
-              Object.keys(prev).forEach(type => {
-                merged[type] = true
-              })
-              return merged
-            })
-          }
-        } catch (evidenceErr) {
-          // Evidence API might not exist yet - continue without it
-          console.log('Evidence API not available:', evidenceErr)
+            }
+          })
+          setCapturedEvidence(captured)
         }
       }
     } catch (err) {
       const errorMessage = 'Failed to load task details. Please try again.'
       setError(errorMessage)
       captureError(err, 'TaskDetail.loadTaskData')
-      trackError(
-        err instanceof Error ? err.name : 'unknown',
-        'task_detail_load'
-      )
+      trackError(err instanceof Error ? err.name : 'unknown', 'task_detail_load')
     } finally {
       setIsLoading(false)
     }
   }
 
-  const handleCaptureStart = async (evidenceType: string) => {
-    setSelectedEvidenceType(evidenceType as EvidenceType)
+  const handleCaptureStart = async (evidenceType: EvidenceType, stage: PhotoStage) => {
+    setSelectedEvidenceType(evidenceType)
+    setSelectedPhotoStage(stage)
     setShowCamera(true)
 
     // Update task status to in_progress if pending
@@ -144,13 +119,13 @@ export default function TaskDetail() {
 
   const handleCaptureComplete = async (evidence: StoredEvidence) => {
     if (evidence.evidenceType) {
-      // Track this capture locally so it won't be wiped by API refresh
-      localCapturesRef.current.add(evidence.evidenceType)
-      
       setCapturedEvidence((prev) => {
         const updated = {
           ...prev,
-          [evidence.evidenceType]: true,
+          [evidence.evidenceType]: {
+            captured: true,
+            stage: selectedPhotoStage || undefined
+          },
         }
 
         // Check if task is now complete
@@ -172,9 +147,10 @@ export default function TaskDetail() {
 
     setShowCamera(false)
     setSelectedEvidenceType(null)
+    setSelectedPhotoStage(null)
 
-    // Note: We no longer call loadTaskData() here to avoid race conditions
-    // The local state is the source of truth for captured evidence
+    // Refresh task data to get updated evidence count
+    loadTaskData()
   }
 
   const updateTaskStatus = async (status: TaskStatus) => {
@@ -194,11 +170,12 @@ export default function TaskDetail() {
   const handleCaptureCancel = () => {
     setShowCamera(false)
     setSelectedEvidenceType(null)
+    setSelectedPhotoStage(null)
   }
 
   if (isLoading) {
     return (
-      <div className="animate-pulse space-y-4" aria-busy="true" aria-label="Loading task details">
+      <div className="animate-pulse space-y-4">
         <div className="h-8 bg-gray-200 rounded w-1/2"></div>
         <div className="h-4 bg-gray-200 rounded w-3/4"></div>
         <div className="h-64 bg-gray-200 rounded"></div>
@@ -206,37 +183,41 @@ export default function TaskDetail() {
     )
   }
 
-  if (!task) {
+  if (error) {
     return (
       <div className="text-center py-12">
-        <AlertCircle className="w-12 h-12 text-gray-300 mx-auto mb-3" aria-hidden="true" />
-        <p className="text-gray-500 mb-4">Task not found</p>
+        <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+        <p className="text-gray-600 mb-4">{error}</p>
         <button
-          onClick={() => navigate(-1)}
-          className="text-green-600 font-medium"
+          onClick={loadTaskData}
+          className="btn btn-primary inline-flex items-center gap-2"
         >
-          Go back
+          <RefreshCw className="w-4 h-4" />
+          Try Again
         </button>
       </div>
     )
   }
 
-  const config = getTaskTypeConfig(task.taskType)
-  const taskStatus = (task.status || 'pending') as TaskStatus
-  const statusConfig = TASK_STATUS_CONFIG[taskStatus] || TASK_STATUS_CONFIG.pending
+  if (!task) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-gray-500">Task not found</p>
+      </div>
+    )
+  }
 
-  // Calculate progress from actual data
-  const capturedCount = Object.keys(capturedEvidence).length
-  const requiredCount = config.requiredEvidence.length
-  const progressPercent = requiredCount > 0 ? (capturedCount / requiredCount) * 100 : 0
+  const config = getTaskTypeConfig(task.taskType)
+  const statusConfig = TASK_STATUS_CONFIG[task.status]
 
   if (showCamera && selectedEvidenceType) {
     return (
       <PhotoCapture
         evidenceType={selectedEvidenceType}
+        photoStage={selectedPhotoStage || undefined}
         taskId={task.id}
         jobId={jobId || task.jobId}
-        workerId={task.workerId}
+        workerId="current-user"
         label={config.label}
         onCapture={handleCaptureComplete}
         onCancel={handleCaptureCancel}
@@ -252,7 +233,6 @@ export default function TaskDetail() {
       </Helmet>
 
       <div className="animate-fade-in">
-        {/* Header */}
         <div className="flex items-center gap-3 mb-6">
           <button
             onClick={() => navigate(-1)}
@@ -264,64 +244,46 @@ export default function TaskDetail() {
           <div>
             <h1 className="text-xl font-bold text-gray-900">{config.label}</h1>
             <div className="flex items-center gap-2 mt-1">
-              <span className={`badge badge-${statusConfig.color}`}>
-                {statusConfig.label}
-              </span>
-              {config.partPNotifiable && (
-                <span className="badge badge-warning">Part P</span>
-              )}
+              <span className={`badge badge-${statusConfig.color}`}>{statusConfig.label}</span>
+              {config.partPNotifiable && <span className="badge badge-warning">Part P</span>}
             </div>
           </div>
         </div>
 
-        {/* Error State */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <p className="text-red-800 text-sm">{error}</p>
-              <button
-                onClick={loadTaskData}
-                className="text-red-600 text-sm font-medium mt-2 flex items-center gap-1 hover:text-red-700"
-              >
-                <RefreshCw className="w-4 h-4" />
-                Try again
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Progress Card */}
+        {/* Progress */}
         <div className="card mb-6">
           <h2 className="font-semibold text-gray-900 mb-3">Progress</h2>
           <div className="flex items-center gap-3">
             <div
               className="flex-1 bg-gray-200 rounded-full h-3"
               role="progressbar"
-              aria-valuenow={Math.round(progressPercent)}
+              aria-valuenow={
+                task.requiredEvidenceCount
+                  ? ((task.evidenceCount || 0) / task.requiredEvidenceCount) * 100
+                  : 0
+              }
               aria-valuemin={0}
               aria-valuemax={100}
               aria-label="Evidence collection progress"
             >
               <div
-                className={`h-3 rounded-full transition-all ${
-                  progressPercent >= 100 ? 'bg-green-600' : 'bg-amber-500'
-                }`}
-                style={{ width: `${Math.min(progressPercent, 100)}%` }}
+                className="bg-green-600 h-3 rounded-full transition-all"
+                style={{
+                  width: `${
+                    task.requiredEvidenceCount
+                      ? ((task.evidenceCount || 0) / task.requiredEvidenceCount) * 100
+                      : 0
+                  }%`,
+                }}
               ></div>
             </div>
             <span className="text-sm font-medium text-gray-700">
-              {capturedCount}/{requiredCount}
+              {task.evidenceCount || 0}/{task.requiredEvidenceCount || 0}
             </span>
           </div>
-          {progressPercent >= 100 && (
-            <p className="text-green-600 text-sm mt-2 font-medium">
-              ✓ All required evidence captured
-            </p>
-          )}
         </div>
 
-        {/* Evidence Checklist */}
+        {/* Evidence Checklist with Stage Selection */}
         <EvidenceChecklist
           taskType={task.taskType}
           capturedEvidence={capturedEvidence}
