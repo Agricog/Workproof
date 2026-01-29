@@ -85,13 +85,15 @@ export default function TaskDetail() {
           ;(evidenceList as Array<Record<string, unknown>>).forEach((ev) => {
             // Handle both camelCase and snake_case from API
             const evType = (ev.evidenceType || ev.evidence_type) as string | undefined
-            const evStage = (ev.photoStage || ev.photo_stage) as PhotoStage | undefined
-            if (evType) {
-              captured[evType] = {
-                captured: true,
-                stage: evStage
-              }
-            }
+const evStage = (ev.photoStage || ev.photo_stage) as PhotoStage | undefined
+if (evType) {
+  // Normalize to snake_case for matching with config
+  const normalizedType = evType.toLowerCase().replace(/\s+/g, '_')
+  captured[normalizedType] = {
+    captured: true,
+    stage: evStage
+  }
+}
           })
           setCapturedEvidence(captured)
         }
