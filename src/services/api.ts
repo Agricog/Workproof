@@ -126,6 +126,17 @@ export const tasksApi = {
     return apiRequest<Task>(`/api/tasks/${taskId}`, {}, token)
   },
 
+  getWithEvidence: async (taskId: string, token?: string | null): Promise<ApiResponse<{
+    task: Task
+    evidence: { items: Evidence[]; total: number }
+  }>> => {
+    return apiRequest<{ task: Task; evidence: { items: Evidence[]; total: number } }>(
+      `/api/tasks/${taskId}/with-evidence`,
+      {},
+      token
+    )
+  },
+
   create: async (data: { job_id: string; task_type: string; notes?: string }, token?: string | null): Promise<ApiResponse<Task>> => {
     return apiRequest<Task>('/api/tasks', {
       method: 'POST',
@@ -334,4 +345,3 @@ export const userApi = {
     }, token)
   },
 }
-
