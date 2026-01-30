@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { TASK_TYPE_CONFIGS } from '../types/taskConfigs'
 import type { TaskType } from '../types/models'
-import { trackPageView, trackEvent } from '../utils/analytics'
+import { trackPageView } from '../utils/analytics'
 import { captureError } from '../utils/errorTracking'
 import { jobsApi, tasksApi } from '../services/api'
 import type { Job, Task } from '../types/models'
@@ -95,8 +95,6 @@ export default function AddTasks() {
         setError(response.error)
         return
       }
-
-      trackEvent('tasks_added')
 
       // Navigate back to job detail
       navigate(`/jobs/${jobId}`)
