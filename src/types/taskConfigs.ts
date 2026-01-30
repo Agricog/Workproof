@@ -289,6 +289,259 @@ export const TASK_TYPE_CONFIGS: Record<TaskType, TaskTypeConfig> = {
       'additional_evidence',
     ],
   },
+
+  // ============================================================================
+  // NEW TASK TYPES
+  // ============================================================================
+
+  bathroom_installation: {
+    id: 'bathroom_installation',
+    label: 'Bathroom Installation',
+    description: 'Electrical work in bathrooms including zones, SELV, and IP ratings',
+    niceicRelevance: 'high',
+    partPNotifiable: true,
+    requiredEvidence: [
+      'zone_identification',
+      'rcd_protection',
+      'bonding_connections',
+      'test_meter_readings',
+      'completed_installation',
+    ],
+    optionalEvidence: [
+      'before_photo',
+      'after_photo',
+      'certificate_photo',
+      'additional_evidence',
+    ],
+  },
+
+  kitchen_installation: {
+    id: 'kitchen_installation',
+    label: 'Kitchen Installation',
+    description: 'Kitchen electrical including cooker circuits, sockets, and appliances',
+    niceicRelevance: 'medium',
+    partPNotifiable: true,
+    requiredEvidence: [
+      'circuit_layout',
+      'connection_points',
+      'protective_device',
+      'test_meter_readings',
+      'completed_installation',
+    ],
+    optionalEvidence: [
+      'before_photo',
+      'after_photo',
+      'certificate_photo',
+      'additional_evidence',
+    ],
+  },
+
+  electric_shower_install: {
+    id: 'electric_shower_install',
+    label: 'Electric Shower Installation',
+    description: 'Electric shower installation including dedicated circuit and isolation',
+    niceicRelevance: 'medium',
+    partPNotifiable: true,
+    requiredEvidence: [
+      'isolation_switch',
+      'cable_route',
+      'connection_points',
+      'test_meter_readings',
+      'completed_installation',
+    ],
+    optionalEvidence: [
+      'before_photo',
+      'after_photo',
+      'certificate_photo',
+      'additional_evidence',
+    ],
+  },
+
+  socket_installation: {
+    id: 'socket_installation',
+    label: 'Socket Installation',
+    description: 'Adding or relocating socket outlets',
+    niceicRelevance: 'low',
+    partPNotifiable: false,
+    requiredEvidence: [
+      'before_photo',
+      'connection_points',
+      'test_meter_readings',
+      'after_photo',
+    ],
+    optionalEvidence: [
+      'cable_route',
+      'additional_evidence',
+    ],
+  },
+
+  lighting_installation: {
+    id: 'lighting_installation',
+    label: 'Lighting Installation',
+    description: 'Interior lighting installation and modifications',
+    niceicRelevance: 'low',
+    partPNotifiable: false,
+    requiredEvidence: [
+      'before_photo',
+      'connection_points',
+      'test_meter_readings',
+      'after_photo',
+    ],
+    optionalEvidence: [
+      'cable_route',
+      'additional_evidence',
+    ],
+  },
+
+  extractor_fan_install: {
+    id: 'extractor_fan_install',
+    label: 'Extractor Fan Installation',
+    description: 'Extractor and ventilation fan installation',
+    niceicRelevance: 'low',
+    partPNotifiable: false,
+    requiredEvidence: [
+      'location_photo',
+      'connection_points',
+      'test_meter_readings',
+      'completed_installation',
+    ],
+    optionalEvidence: [
+      'before_photo',
+      'after_photo',
+      'additional_evidence',
+    ],
+  },
+
+  storage_heater_install: {
+    id: 'storage_heater_install',
+    label: 'Storage Heater Installation',
+    description: 'Storage heater installation including dedicated circuits',
+    niceicRelevance: 'low',
+    partPNotifiable: false,
+    requiredEvidence: [
+      'location_photo',
+      'circuit_layout',
+      'connection_points',
+      'test_meter_readings',
+      'completed_installation',
+    ],
+    optionalEvidence: [
+      'before_photo',
+      'after_photo',
+      'additional_evidence',
+    ],
+  },
+
+  immersion_heater_install: {
+    id: 'immersion_heater_install',
+    label: 'Immersion Heater Installation',
+    description: 'Immersion heater installation and replacement',
+    niceicRelevance: 'low',
+    partPNotifiable: false,
+    requiredEvidence: [
+      'location_photo',
+      'connection_points',
+      'test_meter_readings',
+      'completed_installation',
+    ],
+    optionalEvidence: [
+      'before_photo',
+      'after_photo',
+      'additional_evidence',
+    ],
+  },
+
+  security_system_install: {
+    id: 'security_system_install',
+    label: 'Security System Installation',
+    description: 'Intruder alarm and security system installation',
+    niceicRelevance: 'low',
+    partPNotifiable: false,
+    requiredEvidence: [
+      'panel_photo',
+      'device_locations',
+      'test_activation',
+      'completed_installation',
+    ],
+    optionalEvidence: [
+      'cable_route',
+      'certificate_photo',
+      'additional_evidence',
+    ],
+  },
+
+  cctv_installation: {
+    id: 'cctv_installation',
+    label: 'CCTV Installation',
+    description: 'CCTV camera and recording system installation',
+    niceicRelevance: 'low',
+    partPNotifiable: false,
+    requiredEvidence: [
+      'camera_locations',
+      'recorder_location',
+      'cable_route',
+      'completed_installation',
+    ],
+    optionalEvidence: [
+      'test_result',
+      'certificate_photo',
+      'additional_evidence',
+    ],
+  },
+
+  landlord_certificate: {
+    id: 'landlord_certificate',
+    label: 'Landlord Certificate',
+    description: 'Landlord electrical safety inspection (EICR for rental properties)',
+    niceicRelevance: 'high',
+    partPNotifiable: false,
+    requiredEvidence: [
+      'db_photo',
+      'sample_circuit_tests',
+      'test_meter_readings',
+      'test_instrument_calibration',
+    ],
+    optionalEvidence: [
+      'defects_found',
+      'certificate_photo',
+      'additional_evidence',
+    ],
+  },
+
+  minor_works: {
+    id: 'minor_works',
+    label: 'Minor Works',
+    description: 'BS 7671 Minor Works - small additions and alterations',
+    niceicRelevance: 'low',
+    partPNotifiable: false,
+    requiredEvidence: [
+      'before_photo',
+      'connection_points',
+      'test_meter_readings',
+      'after_photo',
+    ],
+    optionalEvidence: [
+      'certificate_photo',
+      'additional_evidence',
+    ],
+  },
+
+  custom: {
+    id: 'custom',
+    label: 'Custom',
+    description: 'Custom or other electrical work',
+    niceicRelevance: 'low',
+    partPNotifiable: false,
+    requiredEvidence: [
+      'before_photo',
+      'after_photo',
+    ],
+    optionalEvidence: [
+      'test_meter_readings',
+      'certificate_photo',
+      'additional_evidence',
+    ],
+  },
 }
 
 // ============================================================================
