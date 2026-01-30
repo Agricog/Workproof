@@ -161,31 +161,69 @@ function extractStatus(statusValue: unknown): string {
   return 'pending'
 }
 
+// Task type option ID to label mapping
+const TASK_TYPE_OPTIONS: Record<string, string> = {
+  'GZf84': 'consumer_unit_replacement',
+  '8WuQU': 'eicr_inspection',
+  'QYJ13': 'new_circuit_installation',
+  'faGqR': 'emergency_lighting_test',
+  'xT6A4': 'fire_alarm_test',
+  'hSv6P': 'ev_charger_install',
+  'zVX12': 'fault_finding',
+  'EDcwW': 'pat_testing',
+  'HVNT7': 'smoke_co_alarm_install',
+  'OPEoa': 'solar_pv_install',
+  'YbUD2': 'rewire_full',
+  'n74B8': 'rewire_partial',
+  'ZTbWj': 'outdoor_lighting',
+  'nvHim': 'data_cabling',
+  'LC7ux': 'general_maintenance',
+  'THmsG': 'bathroom_installation',
+  'fjAYt': 'kitchen_installation',
+  'h1OT7': 'electric_shower_install',
+  'SWJDB': 'socket_installation',
+  'cTo69': 'lighting_installation',
+  'rGASu': 'extractor_fan_install',
+  'OrwYU': 'storage_heater_install',
+  '13rm4': 'immersion_heater_install',
+  'dlV0y': 'security_system_install',
+  'J7NUh': 'cctv_installation',
+  'keBdW': 'landlord_certificate',
+  'Ag6yQ': 'minor_works',
+  'OSi8A': 'custom',
+}
+
 // Helper: Extract task type value
 function extractTaskType(typeValue: unknown): string {
-  if (!typeValue) return 'general'
+  if (!typeValue) return 'general_maintenance'
+  
+  let rawValue: string | null = null
   
   if (typeof typeValue === 'object' && typeValue !== null) {
     const obj = typeValue as Record<string, unknown>
-    if (obj.label && typeof obj.label === 'string') {
-      return obj.label.toLowerCase().replace(/\s+/g, '_')
-    }
     if (obj.value && typeof obj.value === 'string') {
-      if (/^[a-zA-Z0-9]{5,6}$/.test(obj.value)) {
-        return 'general'
-      }
-      return obj.value.toLowerCase().replace(/\s+/g, '_')
+      rawValue = obj.value
+    } else if (obj.label && typeof obj.label === 'string') {
+      return obj.label.toLowerCase().replace(/[\s/]+/g, '_')
     }
+  } else if (typeof typeValue === 'string') {
+    rawValue = typeValue
   }
   
-  if (typeof typeValue === 'string') {
-    if (/^[a-zA-Z0-9]{5,6}$/.test(typeValue)) {
-      return 'general'
-    }
-    return typeValue.toLowerCase().replace(/\s+/g, '_')
+  if (!rawValue) return 'general_maintenance'
+  
+  // Check option mapping
+  if (TASK_TYPE_OPTIONS[rawValue]) {
+    return TASK_TYPE_OPTIONS[rawValue]
   }
   
-  return 'general'
+  // If it's an option ID we don't know, log it
+  if (/^[a-zA-Z0-9]{5,6}$/.test(rawValue)) {
+    console.log('[TASKS] Unknown task type option ID:', rawValue, '- please add to mapping')
+    return 'general_maintenance'
+  }
+  
+  return rawValue.toLowerCase().replace(/[\s/]+/g, '_')
 }
 
 // Helper: Transform SmartSuite task record to readable format
