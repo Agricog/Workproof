@@ -27,7 +27,6 @@ async function verifyJobOwnership(jobId: string, clerkId: string): Promise<boole
 
   try {
     const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
-    // Check the user field - it may be a string or linked record array
     const jobUser = job[JOB_FIELDS.user as keyof Job]
     if (Array.isArray(jobUser)) {
       return jobUser.includes(userRecordId)
@@ -54,6 +53,22 @@ function extractJobId(jobField: unknown): string | null {
   return null
 }
 
+// Helper: Check if record belongs to job (like tasks.ts does)
+function recordBelongsToJob(record: Record<string, unknown>, jobId: string, fieldKey: string): boolean {
+  const linkedIds = record[fieldKey] as string[] | string | undefined
+  if (!linkedIds) return false
+  const ids = Array.isArray(linkedIds) ? linkedIds : [linkedIds]
+  return ids.includes(jobId)
+}
+
+// Helper: Check if evidence belongs to task
+function evidenceBelongsToTask(record: Record<string, unknown>, taskId: string): boolean {
+  const linkedIds = record[EVIDENCE_FIELDS.task] as string[] | string | undefined
+  if (!linkedIds) return false
+  const ids = Array.isArray(linkedIds) ? linkedIds : [linkedIds]
+  return ids.includes(taskId)
+}
+
 // List audit packs for a job
 auditPacks.get('/job/:jobId', async (c) => {
   const auth = getAuth(c)
@@ -67,16 +82,22 @@ auditPacks.get('/job/:jobId', async (c) => {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    const result = await client.listRecords<AuditPack>(TABLES.AUDIT_PACKS, {
-      filter: {
-        operator: 'and',
-        fields: [{ field: AUDIT_PACK_FIELDS.job, comparison: 'has_any_of', value: [jobId] }]
-      },
-      sort: [{ field: AUDIT_PACK_FIELDS.generated_at, direction: 'desc' }]
+    // Fetch all audit packs and filter in JavaScript (like tasks.ts pattern)
+    const result = await client.listRecords<AuditPack>(TABLES.AUDIT_PACKS, { limit: 200 })
+    
+    const filteredPacks = result.items.filter(pack => 
+      recordBelongsToJob(pack as unknown as Record<string, unknown>, jobId, AUDIT_PACK_FIELDS.job)
+    )
+
+    // Sort by generated_at descending
+    filteredPacks.sort((a, b) => {
+      const aDate = a[AUDIT_PACK_FIELDS.generated_at as keyof AuditPack] as string || ''
+      const bDate = b[AUDIT_PACK_FIELDS.generated_at as keyof AuditPack] as string || ''
+      return new Date(bDate).getTime() - new Date(aDate).getTime()
     })
 
     // Map to response format
-    const items = result.items.map(pack => ({
+    const items = filteredPacks.map(pack => ({
       id: pack.id,
       job: extractJobId(pack[AUDIT_PACK_FIELDS.job as keyof AuditPack]),
       generated_at: pack[AUDIT_PACK_FIELDS.generated_at as keyof AuditPack],
@@ -88,7 +109,7 @@ auditPacks.get('/job/:jobId', async (c) => {
 
     return c.json({
       items,
-      total: result.total
+      total: items.length
     })
   } catch (error) {
     console.error('Error listing audit packs:', error)
@@ -158,39 +179,32 @@ auditPacks.post('/generate', strictRateLimitMiddleware, async (c) => {
     const jobPostcode = (job[JOB_FIELDS.postcode as keyof Job] as string) || ''
     const clientName = (job[JOB_FIELDS.client_name as keyof Job] as string) || ''
 
-    // Get all tasks for the job (linked record uses has_any_of)
-    const tasksResult = await client.listRecords<Task>(TABLES.TASKS, {
-      filter: {
-        operator: 'and',
-        fields: [{ field: TASK_FIELDS.job, comparison: 'has_any_of', value: [body.job] }]
-      },
-      sort: [{ field: TASK_FIELDS.order, direction: 'asc' }]
-    })
+    // Get all tasks and filter by job (like tasks.ts pattern)
+    const tasksResult = await client.listRecords<Task>(TABLES.TASKS, { limit: 200 })
+    const jobTasks = tasksResult.items.filter(task =>
+      recordBelongsToJob(task as unknown as Record<string, unknown>, body.job, TASK_FIELDS.job)
+    )
 
-    // Get all evidence for all tasks
-    const taskIds = tasksResult.items.map(t => t.id)
-    let allEvidence: Evidence[] = []
+    // Get all evidence and filter by task IDs
+    const taskIds = jobTasks.map(t => t.id)
+    const evidenceResult = await client.listRecords<Evidence>(TABLES.EVIDENCE, { limit: 500 })
     
-    for (const taskId of taskIds) {
-      const evidenceResult = await client.listRecords<Evidence>(TABLES.EVIDENCE, {
-        filter: {
-          operator: 'and',
-          fields: [{ field: EVIDENCE_FIELDS.task, comparison: 'has_any_of', value: [taskId] }]
-        },
-        sort: [{ field: EVIDENCE_FIELDS.captured_at, direction: 'asc' }]
-      })
-      allEvidence = allEvidence.concat(evidenceResult.items)
-    }
+    const allEvidence = evidenceResult.items.filter(ev => {
+      const evTaskIds = (ev as unknown as Record<string, unknown>)[EVIDENCE_FIELDS.task] as string[] | string | undefined
+      if (!evTaskIds) return false
+      const ids = Array.isArray(evTaskIds) ? evTaskIds : [evTaskIds]
+      return ids.some(id => taskIds.includes(id))
+    })
 
     // Generate pack hash from all evidence hashes
     const evidenceHashes = allEvidence
-      .map(e => e[EVIDENCE_FIELDS.photo_hash as keyof Evidence] as string || '')
+      .map(e => (e as unknown as Record<string, unknown>)[EVIDENCE_FIELDS.photo_hash] as string || '')
       .filter(h => h)
       .sort()
       .join('')
     
     const packHash = await generateHash(
-      `${body.job}:${jobTitle}:${evidenceHashes}:${new Date().toISOString()}`
+      body.job + ':' + jobTitle + ':' + evidenceHashes + ':' + new Date().toISOString()
     )
 
     // Create audit pack record with SmartSuite field IDs
@@ -204,9 +218,8 @@ auditPacks.post('/generate', strictRateLimitMiddleware, async (c) => {
     const auditPack = await client.createRecord<AuditPack>(TABLES.AUDIT_PACKS, packData as Partial<AuditPack>)
 
     // Count completed tasks
-    const completedTasks = tasksResult.items.filter(t => {
-      const status = t[TASK_FIELDS.status as keyof Task]
-      // Handle both string and object status
+    const completedTasks = jobTasks.filter(t => {
+      const status = (t as unknown as Record<string, unknown>)[TASK_FIELDS.status]
       if (typeof status === 'string') return status === 'completed'
       if (status && typeof status === 'object' && 'value' in status) {
         return (status as { value: string }).value === 'completed'
@@ -226,7 +239,7 @@ auditPacks.post('/generate', strictRateLimitMiddleware, async (c) => {
         address: jobAddress,
         postcode: jobPostcode,
         clientName,
-        taskCount: tasksResult.total,
+        taskCount: jobTasks.length,
         evidenceCount: allEvidence.length,
         completedTasks
       }
@@ -267,31 +280,25 @@ auditPacks.get('/:id/full', async (c) => {
       ? await client.getRecord<User>(TABLES.USERS, userRecordId)
       : null
 
-    // Get all tasks
-    const tasksResult = await client.listRecords<Task>(TABLES.TASKS, {
-      filter: {
-        operator: 'and',
-        fields: [{ field: TASK_FIELDS.job, comparison: 'has_any_of', value: [jobId] }]
-      },
-      sort: [{ field: TASK_FIELDS.order, direction: 'asc' }]
-    })
+    // Get all tasks and filter by job
+    const tasksResult = await client.listRecords<Task>(TABLES.TASKS, { limit: 200 })
+    const jobTasks = tasksResult.items.filter(task =>
+      recordBelongsToJob(task as unknown as Record<string, unknown>, jobId, TASK_FIELDS.job)
+    )
+
+    // Get all evidence
+    const evidenceResult = await client.listRecords<Evidence>(TABLES.EVIDENCE, { limit: 500 })
 
     // Get evidence for each task
-    const tasksWithEvidence = await Promise.all(
-      tasksResult.items.map(async (task) => {
-        const evidenceResult = await client.listRecords<Evidence>(TABLES.EVIDENCE, {
-          filter: {
-            operator: 'and',
-            fields: [{ field: EVIDENCE_FIELDS.task, comparison: 'has_any_of', value: [task.id] }]
-          },
-          sort: [{ field: EVIDENCE_FIELDS.captured_at, direction: 'asc' }]
-        })
-        return {
-          ...task,
-          evidence: evidenceResult.items
-        }
-      })
-    )
+    const tasksWithEvidence = jobTasks.map(task => {
+      const taskEvidence = evidenceResult.items.filter(ev =>
+        evidenceBelongsToTask(ev as unknown as Record<string, unknown>, task.id)
+      )
+      return {
+        ...task,
+        evidence: taskEvidence
+      }
+    })
 
     return c.json({
       pack: {
@@ -414,7 +421,7 @@ auditPacks.post('/:id/share', strictRateLimitMiddleware, async (c) => {
 
     return c.json({ 
       success: true,
-      message: `Audit pack will be shared with ${body.email}`
+      message: 'Audit pack will be shared with ' + body.email
     })
   } catch (error) {
     console.error('Error sharing audit pack:', error)
