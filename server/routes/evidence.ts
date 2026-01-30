@@ -76,10 +76,10 @@ const EVIDENCE_TYPE_OPTIONS: Record<string, string> = {
 }
 
 // Photo Stage option ID -> label (for READING from SmartSuite)
-const PHOTO_STAGE_OPTIONS: Record<string, string> = {
-  'DZX3Z': 'before',
-  'U6zl3': 'after',
-  'Mw4Rd': 'during',
+const PHOTO_STAGE_TO_OPTION_ID: Record<string, string> = {
+  'before': 'DZX3Z',
+  'after': 'U6zl3',
+  'during': 'cDYca',
 }
 
 // Reverse mapping: evidence type string -> SmartSuite option ID (for WRITING to SmartSuite)
