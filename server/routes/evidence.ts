@@ -20,8 +20,7 @@ const R2_BUCKET = process.env.R2_BUCKET_NAME || 'workproof-evidence'
 const userIdCache = new Map<string, { id: string; timestamp: number }>()
 const USER_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
-// SmartSuite option ID -> label mappings (from SmartSuite field settings)
-// Evidence Type options
+// SmartSuite option ID -> label mappings (for READING from SmartSuite)
 const EVIDENCE_TYPE_OPTIONS: Record<string, string> = {
   'mVsNo': 'Before Photo',
   'FTVO5': 'After Photo',
@@ -41,46 +40,111 @@ const EVIDENCE_TYPE_OPTIONS: Record<string, string> = {
   'XNwfW': 'Additional Evidence',
 }
 
-// Photo Stage options
+// Photo Stage option ID -> label (for READING from SmartSuite)
 const PHOTO_STAGE_OPTIONS: Record<string, string> = {
   'DZX3Z': 'Before',
   'U6zl3': 'After',
   'Mw4Rd': 'During',
 }
 
-// Map frontend evidence types to SmartSuite dropdown labels (for writing)
-const EVIDENCE_TYPE_MAP: Record<string, string> = {
-  'before_photo': 'Before Photo',
-  'after_photo': 'After Photo',
-  'meter_reading': 'Meter Reading',
-  'test_meter_readings': 'Meter Reading',
-  'test_result': 'Test Result',
-  'label_photo': 'Label Photo',
-  'label_applied': 'Label Photo',
-  'certificate_photo': 'Certificate Photo',
-  'client_signature': 'Client Signature',
-  'wiring_photo': 'Wiring Photo',
-  'distribution_board': 'Distribution Board',
-  'earthing_arrangement': 'Earthing Arrangement',
-  'bonding_connection': 'Bonding Connection',
-  'rcd_test_reading': 'RCD Test Reading',
-  'insulation_test_reading': 'Insulation Test Reading',
-  'continuity_reading': 'Continuity Reading',
-  'zs_reading': 'ZS Reading',
-  'equipment_photo': 'Before Photo',
-  'completed_installation': 'After Photo',
-  'initial_fault_indication': 'Before Photo',
-  'investigation_photos': 'Before Photo',
-  'resolution': 'After Photo',
-  'test_confirmation': 'Test Result',
-  'additional_evidence': 'Additional Evidence',
+// Reverse mapping: evidence type string -> SmartSuite option ID (for WRITING to SmartSuite)
+const EVIDENCE_TYPE_TO_OPTION_ID: Record<string, string> = {
+  'before_photo': 'mVsNo',
+  'after_photo': 'FTVO5',
+  'meter_reading': 'RvRbr',
+  'test_meter_readings': 'RvRbr',
+  'test_result': '3jYOf',
+  'label_photo': 'Q5wfk',
+  'label_applied': 'Q5wfk',
+  'certificate_photo': 'nLeez',
+  'client_signature': 'YFZBw',
+  'wiring_photo': 'cN18H',
+  'distribution_board': '1YrTO',
+  'db_photo': '1YrTO',
+  'earthing_arrangement': 'F826r',
+  'bonding_connection': 'YIrMi',
+  'bonding_connections': 'YIrMi',
+  'rcd_test_reading': 'E2lOv',
+  'rcd_protection': 'E2lOv',
+  'insulation_test_reading': 'sMhQ9',
+  'continuity_reading': '1M3gg',
+  'zs_reading': 'nZKk1',
+  'additional_evidence': 'XNwfW',
+  // Map common task evidence types to appropriate options
+  'existing_board_condition': 'mVsNo',
+  'isolation_confirmation': 'mVsNo',
+  'new_board_installed': 'FTVO5',
+  'main_earth_bonding': 'F826r',
+  'completed_installation': 'FTVO5',
+  'equipment_photo': 'mVsNo',
+  'initial_fault_indication': 'mVsNo',
+  'investigation_photos': 'mVsNo',
+  'resolution': 'FTVO5',
+  'test_confirmation': '3jYOf',
+  'location_photo': 'mVsNo',
+  'protective_device': 'mVsNo',
+  'cable_route': 'cN18H',
+  'connection_points': 'cN18H',
+  'containment': 'cN18H',
+  'labelling': 'Q5wfk',
+  'sample_circuit_tests': '3jYOf',
+  'test_instrument_calibration': '3jYOf',
+  'defects_found': 'mVsNo',
+  'zone_identification': 'mVsNo',
+  'circuit_layout': 'cN18H',
+  'isolation_switch': 'mVsNo',
+  'device_locations': 'mVsNo',
+  'camera_locations': 'mVsNo',
+  'recorder_location': 'mVsNo',
+  // Emergency lighting / Fire alarm
+  'luminaire_photo': 'mVsNo',
+  'battery_test_readings': '3jYOf',
+  'logbook_entry': 'nLeez',
+  'panel_photo': 'mVsNo',
+  'device_test_log': '3jYOf',
+  'call_point_activation': '3jYOf',
+  // EV / Solar
+  'dno_notification': 'nLeez',
+  'array_location': 'mVsNo',
+  'inverter': 'mVsNo',
+  'ac_dc_isolators': 'mVsNo',
+  'g98_g99_submission': 'nLeez',
+  'dno_acceptance': 'nLeez',
+  // Smoke/CO
+  'location_compliance': 'mVsNo',
+  'alarm_photo': 'mVsNo',
+  'test_activation': '3jYOf',
 }
 
-// Map frontend photo stages to SmartSuite dropdown labels (for writing)
-const PHOTO_STAGE_MAP: Record<string, string> = {
-  'before': 'Before',
-  'during': 'During',
-  'after': 'After',
+// Reverse mapping: photo stage string -> SmartSuite option ID (for WRITING to SmartSuite)
+const PHOTO_STAGE_TO_OPTION_ID: Record<string, string> = {
+  'before': 'DZX3Z',
+  'after': 'U6zl3',
+  'during': 'Mw4Rd',
+}
+
+// Helper: Convert evidence type string to SmartSuite option ID
+function getEvidenceTypeOptionId(evidenceType: string): string {
+  const normalized = evidenceType.toLowerCase().replace(/\s+/g, '_')
+  const optionId = EVIDENCE_TYPE_TO_OPTION_ID[normalized]
+  if (optionId) {
+    return optionId
+  }
+  // Log unknown type and default to Additional Evidence
+  console.log('[EVIDENCE] Unknown evidence type for creation:', evidenceType, '- defaulting to additional_evidence')
+  return EVIDENCE_TYPE_TO_OPTION_ID['additional_evidence'] || 'XNwfW'
+}
+
+// Helper: Convert photo stage string to SmartSuite option ID
+function getPhotoStageOptionId(photoStage: string): string {
+  const normalized = photoStage.toLowerCase()
+  const optionId = PHOTO_STAGE_TO_OPTION_ID[normalized]
+  if (optionId) {
+    return optionId
+  }
+  // Log unknown stage and default to Before
+  console.log('[EVIDENCE] Unknown photo stage for creation:', photoStage, '- defaulting to before')
+  return PHOTO_STAGE_TO_OPTION_ID['before'] || 'DZX3Z'
 }
 
 // Initialize S3 client for R2
@@ -225,7 +289,7 @@ function extractSingleSelectValue(field: unknown, optionMap: Record<string, stri
   if (typeof field === 'string') {
     // Try to look up in option map first
     if (optionMap[field]) {
-      return optionMap[field].toLowerCase()
+      return optionMap[field].toLowerCase().replace(/\s+/g, '_')
     }
     // Log unknown option IDs so we can add them
     if (/^[a-zA-Z0-9]{5,6}$/.test(field)) {
@@ -233,22 +297,22 @@ function extractSingleSelectValue(field: unknown, optionMap: Record<string, stri
       return null
     }
     // It's already a readable label
-    return field.toLowerCase()
+    return field.toLowerCase().replace(/\s+/g, '_')
   }
   
   // If it's an object with label/value
   if (typeof field === 'object' && field !== null) {
     const obj = field as Record<string, unknown>
     if (obj.label && typeof obj.label === 'string') {
-      return obj.label.toLowerCase()
+      return obj.label.toLowerCase().replace(/\s+/g, '_')
     }
     if (obj.value && typeof obj.value === 'string') {
       // Try to look up value in option map
       if (optionMap[obj.value]) {
-        return optionMap[obj.value].toLowerCase()
+        return optionMap[obj.value].toLowerCase().replace(/\s+/g, '_')
       }
       if (!/^[a-zA-Z0-9]{5,6}$/.test(obj.value)) {
-        return obj.value.toLowerCase()
+        return obj.value.toLowerCase().replace(/\s+/g, '_')
       }
     }
   }
@@ -511,7 +575,6 @@ evidence.post('/upload-url', async (c) => {
     const key = `evidence/${auth.userId}/${safeJobId}/${safeTaskId}/${timestamp}-${filename}`
 
     const r2Client = getR2Client()
-
     const command = new PutObjectCommand({
       Bucket: R2_BUCKET,
       Key: key,
@@ -557,11 +620,19 @@ evidence.post('/', async (c) => {
     const photoUrl = (body.photo_url || body.photoUrl) as string
     const photoHash = (body.photo_hash || body.photoHash) as string
 
-    // Map to SmartSuite dropdown labels
-    const evidenceType = EVIDENCE_TYPE_MAP[evidenceTypeRaw] || evidenceTypeRaw
-    const photoStage = photoStageRaw ? (PHOTO_STAGE_MAP[photoStageRaw.toLowerCase()] || photoStageRaw) : undefined
+    // Convert to SmartSuite option IDs
+    const evidenceTypeOptionId = getEvidenceTypeOptionId(evidenceTypeRaw)
+    const photoStageOptionId = photoStageRaw ? getPhotoStageOptionId(photoStageRaw) : undefined
 
-    console.log('[EVIDENCE] Parsed fields:', { taskId, evidenceTypeRaw, evidenceType, photoStageRaw, photoStage, notes, photoUrl: photoUrl?.slice(0, 50) })
+    console.log('[EVIDENCE] Parsed fields:', { 
+      taskId, 
+      evidenceTypeRaw, 
+      evidenceTypeOptionId,
+      photoStageRaw, 
+      photoStageOptionId,
+      notes, 
+      photoUrl: photoUrl?.slice(0, 50) 
+    })
 
     // Validate required fields
     if (!taskId || !evidenceTypeRaw || !photoUrl) {
@@ -575,11 +646,11 @@ evidence.post('/', async (c) => {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    // Build evidence data with SmartSuite field IDs
+    // Build evidence data with SmartSuite field IDs and option IDs
     const evidenceData: Record<string, unknown> = {
       title: `${evidenceTypeRaw} - ${Date.now()}`,
       [EVIDENCE_FIELDS.task]: [taskId],
-      [EVIDENCE_FIELDS.evidence_type]: evidenceType,
+      [EVIDENCE_FIELDS.evidence_type]: evidenceTypeOptionId,
       [EVIDENCE_FIELDS.photo_url]: photoUrl,
       [EVIDENCE_FIELDS.photo_hash]: photoHash || '',
       [EVIDENCE_FIELDS.captured_at]: (body.captured_at || body.capturedAt) as string || new Date().toISOString(),
@@ -588,9 +659,9 @@ evidence.post('/', async (c) => {
     }
 
     // Add photo_stage if provided
-    if (photoStage) {
-      evidenceData[EVIDENCE_FIELDS.photo_stage] = photoStage
-      console.log('[EVIDENCE] Adding photo_stage:', photoStage)
+    if (photoStageOptionId) {
+      evidenceData[EVIDENCE_FIELDS.photo_stage] = photoStageOptionId
+      console.log('[EVIDENCE] Adding photo_stage option ID:', photoStageOptionId)
     }
 
     // Add notes if provided
@@ -619,7 +690,6 @@ evidence.post('/', async (c) => {
     const transformed = transformEvidence(newEvidence as unknown as Record<string, unknown>)
     
     console.log('[EVIDENCE] Created evidence:', transformed.id)
-
     return c.json(transformed, 201)
   } catch (error) {
     console.error('[EVIDENCE] Error creating evidence:', error)
@@ -664,3 +734,4 @@ evidence.delete('/:id', async (c) => {
 })
 
 export default evidence
+
