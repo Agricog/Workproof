@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getSmartSuiteClient, TABLES } from '../lib/smartsuite.js'
+import { USER_FIELDS, JOB_FIELDS, TASK_FIELDS, EVIDENCE_FIELDS, AUDIT_PACK_FIELDS } from '../lib/smartsuite-fields.js'
 import { authMiddleware, getAuth } from '../middleware/auth.js'
 import { rateLimitMiddleware, strictRateLimitMiddleware } from '../middleware/rateLimit.js'
 import type { AuditPack, Job, Task, Evidence, User } from '../types/index.js'
@@ -13,7 +14,7 @@ auditPacks.use('*', authMiddleware)
 // Helper: Get user record ID from Clerk ID
 async function getUserRecordId(clerkId: string): Promise<string | null> {
   const client = getSmartSuiteClient()
-  const user = await client.findByField<User>(TABLES.USERS, 'clerk_id', clerkId)
+  const user = await client.findByField<User>(TABLES.USERS, USER_FIELDS.clerk_id, clerkId)
   return user?.id || null
 }
 
@@ -26,7 +27,12 @@ async function verifyJobOwnership(jobId: string, clerkId: string): Promise<boole
 
   try {
     const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
-    return job.user === userRecordId
+    // Check the user field - it may be a string or linked record array
+    const jobUser = job[JOB_FIELDS.user as keyof Job]
+    if (Array.isArray(jobUser)) {
+      return jobUser.includes(userRecordId)
+    }
+    return jobUser === userRecordId
   } catch {
     return false
   }
@@ -39,6 +45,13 @@ async function generateHash(data: string): Promise<string> {
   const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer)
   const hashArray = Array.from(new Uint8Array(hashBuffer))
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+// Helper: Extract job ID from linked record field
+function extractJobId(jobField: unknown): string | null {
+  if (typeof jobField === 'string') return jobField
+  if (Array.isArray(jobField) && jobField.length > 0) return jobField[0]
+  return null
 }
 
 // List audit packs for a job
@@ -57,13 +70,24 @@ auditPacks.get('/job/:jobId', async (c) => {
     const result = await client.listRecords<AuditPack>(TABLES.AUDIT_PACKS, {
       filter: {
         operator: 'and',
-        fields: [{ field: 'job', comparison: 'is', value: jobId }]
+        fields: [{ field: AUDIT_PACK_FIELDS.job, comparison: 'is', value: jobId }]
       },
-      sort: [{ field: 'generated_at', direction: 'desc' }]
+      sort: [{ field: AUDIT_PACK_FIELDS.generated_at, direction: 'desc' }]
     })
 
+    // Map to response format
+    const items = result.items.map(pack => ({
+      id: pack.id,
+      job: extractJobId(pack[AUDIT_PACK_FIELDS.job as keyof AuditPack]),
+      generated_at: pack[AUDIT_PACK_FIELDS.generated_at as keyof AuditPack],
+      pdf_url: pack[AUDIT_PACK_FIELDS.pdf_url as keyof AuditPack],
+      evidence_count: pack[AUDIT_PACK_FIELDS.evidence_count as keyof AuditPack],
+      hash: pack[AUDIT_PACK_FIELDS.hash as keyof AuditPack],
+      downloaded_at: pack[AUDIT_PACK_FIELDS.downloaded_at as keyof AuditPack]
+    }))
+
     return c.json({
-      items: result.items,
+      items,
       total: result.total
     })
   } catch (error) {
@@ -80,14 +104,29 @@ auditPacks.get('/:id', async (c) => {
 
   try {
     const pack = await client.getRecord<AuditPack>(TABLES.AUDIT_PACKS, packId)
+    
+    // Get job ID from linked field
+    const jobId = extractJobId(pack[AUDIT_PACK_FIELDS.job as keyof AuditPack])
+    if (!jobId) {
+      return c.json({ error: 'Invalid audit pack' }, 400)
+    }
 
     // Verify ownership through job
-    const isOwner = await verifyJobOwnership(pack.job, auth.userId)
+    const isOwner = await verifyJobOwnership(jobId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
-    return c.json(pack)
+    return c.json({
+      id: pack.id,
+      job: jobId,
+      generated_at: pack[AUDIT_PACK_FIELDS.generated_at as keyof AuditPack],
+      pdf_url: pack[AUDIT_PACK_FIELDS.pdf_url as keyof AuditPack],
+      evidence_count: pack[AUDIT_PACK_FIELDS.evidence_count as keyof AuditPack],
+      hash: pack[AUDIT_PACK_FIELDS.hash as keyof AuditPack],
+      downloaded_at: pack[AUDIT_PACK_FIELDS.downloaded_at as keyof AuditPack],
+      shared_with: pack[AUDIT_PACK_FIELDS.shared_with as keyof AuditPack]
+    })
   } catch (error) {
     console.error('Error fetching audit pack:', error)
     return c.json({ error: 'Failed to fetch audit pack' }, 500)
@@ -101,7 +140,7 @@ auditPacks.post('/generate', strictRateLimitMiddleware, async (c) => {
 
   try {
     const body = await c.req.json() as { job: string }
-
+    
     if (!body.job) {
       return c.json({ error: 'Missing required field: job' }, 400)
     }
@@ -114,58 +153,82 @@ auditPacks.post('/generate', strictRateLimitMiddleware, async (c) => {
 
     // Get job details
     const job = await client.getRecord<Job>(TABLES.JOBS, body.job)
+    const jobTitle = (job[JOB_FIELDS.title as keyof Job] as string) || 'Untitled Job'
+    const jobAddress = (job[JOB_FIELDS.address as keyof Job] as string) || ''
+    const jobPostcode = (job[JOB_FIELDS.postcode as keyof Job] as string) || ''
+    const clientName = (job[JOB_FIELDS.client_name as keyof Job] as string) || ''
 
     // Get all tasks for the job
     const tasksResult = await client.listRecords<Task>(TABLES.TASKS, {
       filter: {
         operator: 'and',
-        fields: [{ field: 'job', comparison: 'is', value: body.job }]
+        fields: [{ field: TASK_FIELDS.job, comparison: 'is', value: body.job }]
       },
-      sort: [{ field: 'order', direction: 'asc' }]
+      sort: [{ field: TASK_FIELDS.order, direction: 'asc' }]
     })
 
     // Get all evidence for all tasks
     const taskIds = tasksResult.items.map(t => t.id)
     let allEvidence: Evidence[] = []
-
+    
     for (const taskId of taskIds) {
       const evidenceResult = await client.listRecords<Evidence>(TABLES.EVIDENCE, {
         filter: {
           operator: 'and',
-          fields: [{ field: 'task', comparison: 'is', value: taskId }]
+          fields: [{ field: EVIDENCE_FIELDS.task, comparison: 'is', value: taskId }]
         },
-        sort: [{ field: 'captured_at', direction: 'asc' }]
+        sort: [{ field: EVIDENCE_FIELDS.captured_at, direction: 'asc' }]
       })
       allEvidence = allEvidence.concat(evidenceResult.items)
     }
 
     // Generate pack hash from all evidence hashes
-    const evidenceHashes = allEvidence.map(e => e.photo_hash).sort().join('')
+    const evidenceHashes = allEvidence
+      .map(e => e[EVIDENCE_FIELDS.photo_hash as keyof Evidence] as string || '')
+      .filter(h => h)
+      .sort()
+      .join('')
+    
     const packHash = await generateHash(
-      `${body.job}:${job.title}:${evidenceHashes}:${new Date().toISOString()}`
+      `${body.job}:${jobTitle}:${evidenceHashes}:${new Date().toISOString()}`
     )
 
-    // Create audit pack record
-    const packData: Omit<AuditPack, 'id'> = {
-      job: body.job,
-      generated_at: new Date().toISOString(),
-      evidence_count: allEvidence.length,
-      hash: packHash
+    // Create audit pack record with SmartSuite field IDs
+    const packData: Record<string, unknown> = {
+      [AUDIT_PACK_FIELDS.job]: [body.job], // Linked records are arrays
+      [AUDIT_PACK_FIELDS.generated_at]: new Date().toISOString(),
+      [AUDIT_PACK_FIELDS.evidence_count]: allEvidence.length,
+      [AUDIT_PACK_FIELDS.hash]: packHash
     }
 
-    const auditPack = await client.createRecord<AuditPack>(TABLES.AUDIT_PACKS, packData)
+    const auditPack = await client.createRecord<AuditPack>(TABLES.AUDIT_PACKS, packData as Partial<AuditPack>)
+
+    // Count completed tasks
+    const completedTasks = tasksResult.items.filter(t => {
+      const status = t[TASK_FIELDS.status as keyof Task]
+      // Handle both string and object status
+      if (typeof status === 'string') return status === 'completed'
+      if (status && typeof status === 'object' && 'value' in status) {
+        return (status as { value: string }).value === 'completed'
+      }
+      return false
+    }).length
 
     // Return pack with summary
     return c.json({
-      ...auditPack,
+      id: auditPack.id,
+      job: body.job,
+      generated_at: packData[AUDIT_PACK_FIELDS.generated_at],
+      evidence_count: allEvidence.length,
+      hash: packHash,
       summary: {
-        jobTitle: job.title,
-        address: job.address,
-        postcode: job.postcode,
-        clientName: job.client_name,
+        jobTitle,
+        address: jobAddress,
+        postcode: jobPostcode,
+        clientName,
         taskCount: tasksResult.total,
         evidenceCount: allEvidence.length,
-        completedTasks: tasksResult.items.filter(t => t.status === 'completed').length
+        completedTasks
       }
     }, 201)
   } catch (error) {
@@ -182,15 +245,21 @@ auditPacks.get('/:id/full', async (c) => {
 
   try {
     const pack = await client.getRecord<AuditPack>(TABLES.AUDIT_PACKS, packId)
+    
+    // Get job ID from linked field
+    const jobId = extractJobId(pack[AUDIT_PACK_FIELDS.job as keyof AuditPack])
+    if (!jobId) {
+      return c.json({ error: 'Invalid audit pack' }, 400)
+    }
 
     // Verify ownership through job
-    const isOwner = await verifyJobOwnership(pack.job, auth.userId)
+    const isOwner = await verifyJobOwnership(jobId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
     // Get job details
-    const job = await client.getRecord<Job>(TABLES.JOBS, pack.job)
+    const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
 
     // Get user details
     const userRecordId = await getUserRecordId(auth.userId)
@@ -202,9 +271,9 @@ auditPacks.get('/:id/full', async (c) => {
     const tasksResult = await client.listRecords<Task>(TABLES.TASKS, {
       filter: {
         operator: 'and',
-        fields: [{ field: 'job', comparison: 'is', value: pack.job }]
+        fields: [{ field: TASK_FIELDS.job, comparison: 'is', value: jobId }]
       },
-      sort: [{ field: 'order', direction: 'asc' }]
+      sort: [{ field: TASK_FIELDS.order, direction: 'asc' }]
     })
 
     // Get evidence for each task
@@ -213,9 +282,9 @@ auditPacks.get('/:id/full', async (c) => {
         const evidenceResult = await client.listRecords<Evidence>(TABLES.EVIDENCE, {
           filter: {
             operator: 'and',
-            fields: [{ field: 'task', comparison: 'is', value: task.id }]
+            fields: [{ field: EVIDENCE_FIELDS.task, comparison: 'is', value: task.id }]
           },
-          sort: [{ field: 'captured_at', direction: 'asc' }]
+          sort: [{ field: EVIDENCE_FIELDS.captured_at, direction: 'asc' }]
         })
         return {
           ...task,
@@ -225,14 +294,27 @@ auditPacks.get('/:id/full', async (c) => {
     )
 
     return c.json({
-      pack,
-      job,
+      pack: {
+        id: pack.id,
+        job: jobId,
+        generated_at: pack[AUDIT_PACK_FIELDS.generated_at as keyof AuditPack],
+        evidence_count: pack[AUDIT_PACK_FIELDS.evidence_count as keyof AuditPack],
+        hash: pack[AUDIT_PACK_FIELDS.hash as keyof AuditPack]
+      },
+      job: {
+        id: job.id,
+        title: job[JOB_FIELDS.title as keyof Job],
+        address: job[JOB_FIELDS.address as keyof Job],
+        postcode: job[JOB_FIELDS.postcode as keyof Job],
+        client_name: job[JOB_FIELDS.client_name as keyof Job],
+        start_date: job[JOB_FIELDS.start_date as keyof Job]
+      },
       user: user ? {
-        full_name: user.full_name,
-        company_name: user.company_name,
-        niceic_number: user.niceic_number,
-        email: user.email,
-        phone: user.phone
+        full_name: user[USER_FIELDS.full_name as keyof User],
+        company_name: user[USER_FIELDS.company_name as keyof User],
+        niceic_number: user[USER_FIELDS.niceic_number as keyof User],
+        email: user[USER_FIELDS.email as keyof User],
+        phone: user[USER_FIELDS.phone as keyof User]
       } : null,
       tasks: tasksWithEvidence
     })
@@ -250,20 +332,33 @@ auditPacks.post('/:id/downloaded', async (c) => {
 
   try {
     const pack = await client.getRecord<AuditPack>(TABLES.AUDIT_PACKS, packId)
+    
+    // Get job ID from linked field
+    const jobId = extractJobId(pack[AUDIT_PACK_FIELDS.job as keyof AuditPack])
+    if (!jobId) {
+      return c.json({ error: 'Invalid audit pack' }, 400)
+    }
 
     // Verify ownership
-    const isOwner = await verifyJobOwnership(pack.job, auth.userId)
+    const isOwner = await verifyJobOwnership(jobId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
+    }
+
+    const updateData: Record<string, unknown> = {
+      [AUDIT_PACK_FIELDS.downloaded_at]: new Date().toISOString()
     }
 
     const updatedPack = await client.updateRecord<AuditPack>(
       TABLES.AUDIT_PACKS,
       packId,
-      { downloaded_at: new Date().toISOString() }
+      updateData as Partial<AuditPack>
     )
 
-    return c.json(updatedPack)
+    return c.json({
+      id: updatedPack.id,
+      downloaded_at: updatedPack[AUDIT_PACK_FIELDS.downloaded_at as keyof AuditPack]
+    })
   } catch (error) {
     console.error('Error updating audit pack:', error)
     return c.json({ error: 'Failed to update audit pack' }, 500)
@@ -278,7 +373,7 @@ auditPacks.post('/:id/share', strictRateLimitMiddleware, async (c) => {
 
   try {
     const body = await c.req.json() as { email: string }
-
+    
     if (!body.email) {
       return c.json({ error: 'Missing required field: email' }, 400)
     }
@@ -290,18 +385,28 @@ auditPacks.post('/:id/share', strictRateLimitMiddleware, async (c) => {
     }
 
     const pack = await client.getRecord<AuditPack>(TABLES.AUDIT_PACKS, packId)
+    
+    // Get job ID from linked field
+    const jobId = extractJobId(pack[AUDIT_PACK_FIELDS.job as keyof AuditPack])
+    if (!jobId) {
+      return c.json({ error: 'Invalid audit pack' }, 400)
+    }
 
     // Verify ownership
-    const isOwner = await verifyJobOwnership(pack.job, auth.userId)
+    const isOwner = await verifyJobOwnership(jobId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
     // Update shared_with field
+    const updateData: Record<string, unknown> = {
+      [AUDIT_PACK_FIELDS.shared_with]: body.email
+    }
+
     await client.updateRecord<AuditPack>(
       TABLES.AUDIT_PACKS,
       packId,
-      { shared_with: body.email }
+      updateData as Partial<AuditPack>
     )
 
     // TODO: Send email via Resend
@@ -325,9 +430,15 @@ auditPacks.delete('/:id', async (c) => {
 
   try {
     const pack = await client.getRecord<AuditPack>(TABLES.AUDIT_PACKS, packId)
+    
+    // Get job ID from linked field
+    const jobId = extractJobId(pack[AUDIT_PACK_FIELDS.job as keyof AuditPack])
+    if (!jobId) {
+      return c.json({ error: 'Invalid audit pack' }, 400)
+    }
 
     // Verify ownership
-    const isOwner = await verifyJobOwnership(pack.job, auth.userId)
+    const isOwner = await verifyJobOwnership(jobId, auth.userId)
     if (!isOwner) {
       return c.json({ error: 'Forbidden' }, 403)
     }
