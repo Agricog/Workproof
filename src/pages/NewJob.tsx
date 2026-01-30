@@ -6,8 +6,8 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
 import { useAuth } from '@clerk/clerk-react'
-import { ArrowLeft, MapPin, User, Calendar, Plus, AlertCircle } from 'lucide-react'
-import { validateAddress, validateClientName } from '../utils/validation'
+import { ArrowLeft, MapPin, User, Calendar, Plus, AlertCircle, Phone, Mail, FileText } from 'lucide-react'
+import { validateAddress, validateClientName, validateInput } from '../utils/validation'
 import { sanitizeInput } from '../utils/sanitization'
 import { TASK_TYPE_CONFIGS } from '../types/taskConfigs'
 import type { TaskType } from '../types/models'
@@ -17,15 +17,23 @@ import { jobsApi, tasksApi } from '../services/api'
 
 interface FormData {
   address: string
+  postcode: string
   clientName: string
+  clientPhone: string
+  clientEmail: string
   startDate: string
+  notes: string
   selectedTasks: TaskType[]
 }
 
 interface FormErrors {
   address?: string
+  postcode?: string
   clientName?: string
+  clientPhone?: string
+  clientEmail?: string
   startDate?: string
+  notes?: string
   tasks?: string
   submit?: string
 }
@@ -36,8 +44,12 @@ export default function NewJob() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState<FormData>({
     address: '',
+    postcode: '',
     clientName: '',
+    clientPhone: '',
+    clientEmail: '',
     startDate: new Date().toISOString().split('T')[0] || '',
+    notes: '',
     selectedTasks: [],
   })
   const [errors, setErrors] = useState<FormErrors>({})
@@ -57,6 +69,27 @@ export default function NewJob() {
     }
   }
 
+  const handlePostcodeChange = (value: string) => {
+    const sanitized = sanitizeInput(value).toUpperCase()
+    setFormData((prev) => ({ ...prev, postcode: sanitized }))
+    
+    // Only validate if not empty (postcode is optional but must be valid if provided)
+    if (sanitized) {
+      const validation = validateInput(sanitized, 'postcode', 10)
+      if (!validation.isValid) {
+        const errorKeys = Object.keys(validation.errors)
+        const errorKey = errorKeys[0]
+        if (errorKey) {
+          setErrors((prev) => ({ ...prev, postcode: validation.errors[errorKey] }))
+        }
+      } else {
+        setErrors((prev) => ({ ...prev, postcode: undefined }))
+      }
+    } else {
+      setErrors((prev) => ({ ...prev, postcode: undefined }))
+    }
+  }
+
   const handleClientNameChange = (value: string) => {
     const sanitized = sanitizeInput(value)
     setFormData((prev) => ({ ...prev, clientName: sanitized }))
@@ -69,6 +102,60 @@ export default function NewJob() {
       }
     } else {
       setErrors((prev) => ({ ...prev, clientName: undefined }))
+    }
+  }
+
+  const handlePhoneChange = (value: string) => {
+    const sanitized = sanitizeInput(value)
+    setFormData((prev) => ({ ...prev, clientPhone: sanitized }))
+    
+    // Only validate if not empty (phone is optional)
+    if (sanitized) {
+      const validation = validateInput(sanitized, 'phone', 20)
+      if (!validation.isValid) {
+        const errorKeys = Object.keys(validation.errors)
+        const errorKey = errorKeys[0]
+        if (errorKey) {
+          setErrors((prev) => ({ ...prev, clientPhone: validation.errors[errorKey] }))
+        }
+      } else {
+        setErrors((prev) => ({ ...prev, clientPhone: undefined }))
+      }
+    } else {
+      setErrors((prev) => ({ ...prev, clientPhone: undefined }))
+    }
+  }
+
+  const handleEmailChange = (value: string) => {
+    const sanitized = sanitizeInput(value)
+    setFormData((prev) => ({ ...prev, clientEmail: sanitized }))
+    
+    // Only validate if not empty (email is optional)
+    if (sanitized) {
+      const validation = validateInput(sanitized, 'email', 100)
+      if (!validation.isValid) {
+        const errorKeys = Object.keys(validation.errors)
+        const errorKey = errorKeys[0]
+        if (errorKey) {
+          setErrors((prev) => ({ ...prev, clientEmail: validation.errors[errorKey] }))
+        }
+      } else {
+        setErrors((prev) => ({ ...prev, clientEmail: undefined }))
+      }
+    } else {
+      setErrors((prev) => ({ ...prev, clientEmail: undefined }))
+    }
+  }
+
+  const handleNotesChange = (value: string) => {
+    const sanitized = sanitizeInput(value)
+    setFormData((prev) => ({ ...prev, notes: sanitized }))
+    
+    // Notes have a max length but no format validation
+    if (sanitized.length > 1000) {
+      setErrors((prev) => ({ ...prev, notes: 'Notes must be under 1000 characters' }))
+    } else {
+      setErrors((prev) => ({ ...prev, notes: undefined }))
     }
   }
 
@@ -94,6 +181,18 @@ export default function NewJob() {
       }
     }
 
+    // Postcode validation (optional but must be valid UK format if provided)
+    if (formData.postcode) {
+      const postcodeValidation = validateInput(formData.postcode, 'postcode', 10)
+      if (!postcodeValidation.isValid) {
+        const errorKeys = Object.keys(postcodeValidation.errors)
+        const errorKey = errorKeys[0]
+        if (errorKey) {
+          newErrors.postcode = postcodeValidation.errors[errorKey]
+        }
+      }
+    }
+
     const clientValidation = validateClientName(formData.clientName)
     if (!clientValidation.isValid) {
       const errorKeys = Object.keys(clientValidation.errors)
@@ -103,12 +202,41 @@ export default function NewJob() {
       }
     }
 
+    // Phone validation (optional)
+    if (formData.clientPhone) {
+      const phoneValidation = validateInput(formData.clientPhone, 'phone', 20)
+      if (!phoneValidation.isValid) {
+        const errorKeys = Object.keys(phoneValidation.errors)
+        const errorKey = errorKeys[0]
+        if (errorKey) {
+          newErrors.clientPhone = phoneValidation.errors[errorKey]
+        }
+      }
+    }
+
+    // Email validation (optional)
+    if (formData.clientEmail) {
+      const emailValidation = validateInput(formData.clientEmail, 'email', 100)
+      if (!emailValidation.isValid) {
+        const errorKeys = Object.keys(emailValidation.errors)
+        const errorKey = errorKeys[0]
+        if (errorKey) {
+          newErrors.clientEmail = emailValidation.errors[errorKey]
+        }
+      }
+    }
+
     if (!formData.startDate) {
       newErrors.startDate = 'Start date is required'
     }
 
     if (formData.selectedTasks.length === 0) {
       newErrors.tasks = 'Select at least one task type'
+    }
+
+    // Notes length check
+    if (formData.notes && formData.notes.length > 1000) {
+      newErrors.notes = 'Notes must be under 1000 characters'
     }
 
     setErrors(newErrors)
@@ -128,12 +256,16 @@ export default function NewJob() {
     try {
       const token = await getToken()
 
-      // Create the job
+      // Create the job with all fields
       const jobResponse = await jobsApi.create({
         address: formData.address,
+        postcode: formData.postcode || undefined,
         clientName: formData.clientName,
+        clientPhone: formData.clientPhone || undefined,
+        clientEmail: formData.clientEmail || undefined,
         startDate: formData.startDate,
-        status: 'active',
+        notes: formData.notes || undefined,
+        status: 'draft',
       }, token)
 
       if (jobResponse.error || !jobResponse.data) {
@@ -201,12 +333,13 @@ export default function NewJob() {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="card">
-            <h2 className="font-semibold text-gray-900 mb-4">Job Details</h2>
+            <h2 className="font-semibold text-gray-900 mb-4">Site Details</h2>
 
             <div className="space-y-4">
+              {/* Address */}
               <div>
                 <label htmlFor="address" className="block text-sm font-medium text-gray-700 mb-1">
-                  Site Address
+                  Site Address <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
                   <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" aria-hidden="true" />
@@ -228,9 +361,39 @@ export default function NewJob() {
                 )}
               </div>
 
+              {/* Postcode */}
+              <div>
+                <label htmlFor="postcode" className="block text-sm font-medium text-gray-700 mb-1">
+                  Postcode
+                </label>
+                <input
+                  id="postcode"
+                  type="text"
+                  value={formData.postcode}
+                  onChange={(e) => handlePostcodeChange(e.target.value)}
+                  className={`input-field ${errors.postcode ? 'border-red-500' : ''}`}
+                  placeholder="e.g. SW1A 1AA"
+                  maxLength={10}
+                  aria-invalid={!!errors.postcode}
+                  aria-describedby={errors.postcode ? 'postcode-error' : undefined}
+                />
+                {errors.postcode && (
+                  <p id="postcode-error" className="text-red-600 text-sm mt-1" role="alert">
+                    {errors.postcode}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <h2 className="font-semibold text-gray-900 mb-4">Client Details</h2>
+
+            <div className="space-y-4">
+              {/* Client Name */}
               <div>
                 <label htmlFor="clientName" className="block text-sm font-medium text-gray-700 mb-1">
-                  Client Name
+                  Client Name <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" aria-hidden="true" />
@@ -252,9 +415,66 @@ export default function NewJob() {
                 )}
               </div>
 
+              {/* Client Phone */}
+              <div>
+                <label htmlFor="clientPhone" className="block text-sm font-medium text-gray-700 mb-1">
+                  Client Phone
+                </label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" aria-hidden="true" />
+                  <input
+                    id="clientPhone"
+                    type="tel"
+                    value={formData.clientPhone}
+                    onChange={(e) => handlePhoneChange(e.target.value)}
+                    className={`input-field pl-10 ${errors.clientPhone ? 'border-red-500' : ''}`}
+                    placeholder="e.g. 07700 900000"
+                    aria-invalid={!!errors.clientPhone}
+                    aria-describedby={errors.clientPhone ? 'phone-error' : undefined}
+                  />
+                </div>
+                {errors.clientPhone && (
+                  <p id="phone-error" className="text-red-600 text-sm mt-1" role="alert">
+                    {errors.clientPhone}
+                  </p>
+                )}
+              </div>
+
+              {/* Client Email */}
+              <div>
+                <label htmlFor="clientEmail" className="block text-sm font-medium text-gray-700 mb-1">
+                  Client Email
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" aria-hidden="true" />
+                  <input
+                    id="clientEmail"
+                    type="email"
+                    value={formData.clientEmail}
+                    onChange={(e) => handleEmailChange(e.target.value)}
+                    className={`input-field pl-10 ${errors.clientEmail ? 'border-red-500' : ''}`}
+                    placeholder="client@example.com"
+                    aria-invalid={!!errors.clientEmail}
+                    aria-describedby={errors.clientEmail ? 'email-error' : undefined}
+                  />
+                </div>
+                {errors.clientEmail && (
+                  <p id="email-error" className="text-red-600 text-sm mt-1" role="alert">
+                    {errors.clientEmail}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <h2 className="font-semibold text-gray-900 mb-4">Job Details</h2>
+
+            <div className="space-y-4">
+              {/* Start Date */}
               <div>
                 <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1">
-                  Start Date
+                  Start Date <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
                   <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" aria-hidden="true" />
@@ -274,13 +494,41 @@ export default function NewJob() {
                   </p>
                 )}
               </div>
+
+              {/* Notes */}
+              <div>
+                <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-1">
+                  Notes
+                </label>
+                <div className="relative">
+                  <FileText className="absolute left-3 top-3 w-5 h-5 text-gray-400" aria-hidden="true" />
+                  <textarea
+                    id="notes"
+                    value={formData.notes}
+                    onChange={(e) => handleNotesChange(e.target.value)}
+                    className={`input-field pl-10 min-h-[100px] ${errors.notes ? 'border-red-500' : ''}`}
+                    placeholder="Any additional notes about this job..."
+                    maxLength={1000}
+                    aria-invalid={!!errors.notes}
+                    aria-describedby={errors.notes ? 'notes-error' : 'notes-hint'}
+                  />
+                </div>
+                <p id="notes-hint" className="text-gray-500 text-xs mt-1">
+                  {formData.notes.length}/1000 characters
+                </p>
+                {errors.notes && (
+                  <p id="notes-error" className="text-red-600 text-sm mt-1" role="alert">
+                    {errors.notes}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 
           <div className="card">
             <h2 className="font-semibold text-gray-900 mb-4">Task Types</h2>
             <p className="text-sm text-gray-600 mb-4">
-              Select the types of work for this job
+              Select the types of work for this job <span className="text-red-500">*</span>
             </p>
 
             {errors.tasks && (
