@@ -51,7 +51,9 @@ export default function AddTasks() {
 
       // Load existing tasks
       const tasksResponse = await tasksApi.listByJob(jobId, token)
-      if (tasksResponse.data) {
+      if (tasksResponse.data?.items) {
+        setExistingTasks(tasksResponse.data.items)
+      } else if (Array.isArray(tasksResponse.data)) {
         setExistingTasks(tasksResponse.data)
       }
     } catch (err) {
