@@ -543,6 +543,7 @@ tasks.get('/:id/with-evidence', async (c) => {
     const transformedEvidence = taskEvidence.map((ev: Record<string, unknown>) => {
       const evType = ev[EVIDENCE_FIELDS.evidence_type]
       const evStage = ev[EVIDENCE_FIELDS.photo_stage]
+      console.log('[TASKS] Evidence photo_stage raw:', evStage)
       const photoUrl = ev[EVIDENCE_FIELDS.photo_url] as string | undefined
 
       return {
