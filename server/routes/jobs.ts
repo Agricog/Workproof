@@ -11,6 +11,67 @@ const jobs = new Hono()
 jobs.use('*', rateLimitMiddleware)
 jobs.use('*', authMiddleware)
 
+// ============================================================================
+// STATUS OPTION ID MAPPING
+// SmartSuite single-select fields require option IDs, not labels
+// ============================================================================
+const JOB_STATUS_TO_OPTION_ID: Record<string, string> = {
+  'draft': 'zjJD8',
+  'in_progress': 'z3hUD',
+  'completed': 'SDzSd',
+  'archived': 'Dr8R1',
+}
+
+const OPTION_ID_TO_JOB_STATUS: Record<string, string> = {
+  'zjJD8': 'draft',
+  'z3hUD': 'in_progress',
+  'SDzSd': 'completed',
+  'Dr8R1': 'archived',
+}
+
+/**
+ * Convert status label to SmartSuite option ID
+ */
+function getStatusOptionId(status: string): string {
+  const normalized = status.toLowerCase().replace(/\s+/g, '_')
+  return JOB_STATUS_TO_OPTION_ID[normalized] || JOB_STATUS_TO_OPTION_ID['draft']
+}
+
+/**
+ * Extract status label from SmartSuite field value
+ */
+function extractStatus(value: unknown): string {
+  if (!value) return 'draft'
+
+  // If it's already a known status string
+  if (typeof value === 'string') {
+    const normalized = value.toLowerCase().replace(/\s+/g, '_')
+    if (JOB_STATUS_TO_OPTION_ID[normalized]) {
+      return normalized
+    }
+    // Check if it's an option ID
+    if (OPTION_ID_TO_JOB_STATUS[value]) {
+      return OPTION_ID_TO_JOB_STATUS[value]
+    }
+    return 'draft'
+  }
+
+  // If it's an object with value/label
+  if (typeof value === 'object' && value !== null) {
+    const obj = value as Record<string, unknown>
+    if (obj.value && typeof obj.value === 'string') {
+      if (OPTION_ID_TO_JOB_STATUS[obj.value]) {
+        return OPTION_ID_TO_JOB_STATUS[obj.value]
+      }
+    }
+    if (obj.label && typeof obj.label === 'string') {
+      return obj.label.toLowerCase().replace(/\s+/g, '_')
+    }
+  }
+
+  return 'draft'
+}
+
 // Helper: Get user record ID from Clerk ID
 async function getUserRecordId(clerkId: string): Promise<string | null> {
   const client = getSmartSuiteClient()
@@ -63,18 +124,17 @@ function transformJob(
     startDate = new Date().toISOString().split('T')[0]
   }
 
-  // Handle status field - may be string ID or object
-  const statusRaw = record[JOB_FIELDS.status]
-  let status = 'active'
-  if (typeof statusRaw === 'string') {
-    // Check if it's a known status or a SmartSuite ID
-    const knownStatuses = ['draft', 'active', 'in_progress', 'completed', 'archived']
-    if (knownStatuses.includes(statusRaw.toLowerCase())) {
-      status = statusRaw.toLowerCase()
-    }
-  } else if (statusRaw && typeof statusRaw === 'object' && 'label' in statusRaw) {
-    status = (statusRaw as { label: string }).label.toLowerCase().replace(/\s+/g, '_')
+  // Handle created_at field
+  const createdAtRaw = record[JOB_FIELDS.created_at]
+  let createdAt: string | undefined
+  if (createdAtRaw && typeof createdAtRaw === 'object' && 'date' in createdAtRaw) {
+    createdAt = (createdAtRaw as { date: string }).date
+  } else if (typeof createdAtRaw === 'string') {
+    createdAt = createdAtRaw
   }
+
+  // Extract status using the helper
+  const status = extractStatus(record[JOB_FIELDS.status])
 
   return {
     id: record.id,
@@ -88,7 +148,7 @@ function transformJob(
     startDate: startDate,
     completionDate: record[JOB_FIELDS.completion_date],
     notes: record[JOB_FIELDS.notes],
-    createdAt: record[JOB_FIELDS.created_at],
+    createdAt: createdAt,
     taskCount: taskCount,
     evidenceCount: evidenceCount
   }
@@ -124,13 +184,8 @@ jobs.get('/', async (c) => {
     if (status) {
       filteredJobs = filteredJobs.filter(item => {
         const jobRecord = item as unknown as Record<string, unknown>
-        const statusRaw = jobRecord[JOB_FIELDS.status]
-        if (typeof statusRaw === 'string') {
-          return statusRaw === status
-        } else if (statusRaw && typeof statusRaw === 'object' && 'label' in statusRaw) {
-          return (statusRaw as { label: string }).label.toLowerCase() === status
-        }
-        return false
+        const jobStatus = extractStatus(jobRecord[JOB_FIELDS.status])
+        return jobStatus === status.toLowerCase().replace(/\s+/g, '_')
       })
     }
 
@@ -233,6 +288,7 @@ jobs.post('/', async (c) => {
     const clientPhone = (body.clientPhone || body.client_phone) as string | undefined
     const clientEmail = (body.clientEmail || body.client_email) as string | undefined
     const notes = body.notes as string | undefined
+    const status = body.status as string | undefined
 
     // Validate required fields
     if (!address) {
@@ -248,6 +304,10 @@ jobs.post('/', async (c) => {
 
     // Format date for SmartSuite
     const formattedStartDate = startDate || new Date().toISOString().split('T')[0]
+    const createdAtDate = new Date().toISOString().split('T')[0]
+
+    // Get status option ID (default to 'draft')
+    const statusOptionId = getStatusOptionId(status || 'draft')
 
     // Create job with SmartSuite field IDs
     const jobData: Record<string, unknown> = {
@@ -256,8 +316,9 @@ jobs.post('/', async (c) => {
       [JOB_FIELDS.address]: address,
       [JOB_FIELDS.postcode]: postcode?.toUpperCase() || '',
       [JOB_FIELDS.client_name]: clientName,
-      [JOB_FIELDS.status]: 'active',
-      [JOB_FIELDS.start_date]: formattedStartDate
+      [JOB_FIELDS.status]: statusOptionId,
+      [JOB_FIELDS.start_date]: { date: formattedStartDate },
+      [JOB_FIELDS.created_at]: { date: createdAtDate }
     }
 
     if (clientPhone) jobData[JOB_FIELDS.client_phone] = clientPhone
@@ -303,10 +364,26 @@ jobs.patch('/:id', async (c) => {
     if (body.clientPhone !== undefined) updateData[JOB_FIELDS.client_phone] = body.clientPhone
     if (body.client_email !== undefined) updateData[JOB_FIELDS.client_email] = body.client_email
     if (body.clientEmail !== undefined) updateData[JOB_FIELDS.client_email] = body.clientEmail
-    if (body.status !== undefined) updateData[JOB_FIELDS.status] = body.status
-    if (body.completion_date !== undefined) updateData[JOB_FIELDS.completion_date] = body.completion_date
-    if (body.completionDate !== undefined) updateData[JOB_FIELDS.completion_date] = body.completionDate
     if (body.notes !== undefined) updateData[JOB_FIELDS.notes] = body.notes
+    
+    // Handle status with option ID conversion
+    if (body.status !== undefined) {
+      updateData[JOB_FIELDS.status] = getStatusOptionId(body.status as string)
+    }
+    
+    // Handle date fields
+    if (body.completion_date !== undefined) {
+      updateData[JOB_FIELDS.completion_date] = { date: body.completion_date }
+    }
+    if (body.completionDate !== undefined) {
+      updateData[JOB_FIELDS.completion_date] = { date: body.completionDate }
+    }
+    if (body.start_date !== undefined) {
+      updateData[JOB_FIELDS.start_date] = { date: body.start_date }
+    }
+    if (body.startDate !== undefined) {
+      updateData[JOB_FIELDS.start_date] = { date: body.startDate }
+    }
 
     if (Object.keys(updateData).length === 0) {
       return c.json({ error: 'No valid fields to update' }, 400)
@@ -368,10 +445,26 @@ jobs.put('/:id', async (c) => {
     if (body.clientPhone !== undefined) updateData[JOB_FIELDS.client_phone] = body.clientPhone
     if (body.client_email !== undefined) updateData[JOB_FIELDS.client_email] = body.client_email
     if (body.clientEmail !== undefined) updateData[JOB_FIELDS.client_email] = body.clientEmail
-    if (body.status !== undefined) updateData[JOB_FIELDS.status] = body.status
-    if (body.completion_date !== undefined) updateData[JOB_FIELDS.completion_date] = body.completion_date
-    if (body.completionDate !== undefined) updateData[JOB_FIELDS.completion_date] = body.completionDate
     if (body.notes !== undefined) updateData[JOB_FIELDS.notes] = body.notes
+    
+    // Handle status with option ID conversion
+    if (body.status !== undefined) {
+      updateData[JOB_FIELDS.status] = getStatusOptionId(body.status as string)
+    }
+    
+    // Handle date fields
+    if (body.completion_date !== undefined) {
+      updateData[JOB_FIELDS.completion_date] = { date: body.completion_date }
+    }
+    if (body.completionDate !== undefined) {
+      updateData[JOB_FIELDS.completion_date] = { date: body.completionDate }
+    }
+    if (body.start_date !== undefined) {
+      updateData[JOB_FIELDS.start_date] = { date: body.start_date }
+    }
+    if (body.startDate !== undefined) {
+      updateData[JOB_FIELDS.start_date] = { date: body.startDate }
+    }
 
     if (Object.keys(updateData).length === 0) {
       return c.json({ error: 'No valid fields to update' }, 400)
