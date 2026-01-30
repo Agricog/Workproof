@@ -20,100 +20,122 @@ const R2_BUCKET = process.env.R2_BUCKET_NAME || 'workproof-evidence'
 const userIdCache = new Map<string, { id: string; timestamp: number }>()
 const USER_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
-// SmartSuite option ID -> label mappings (for READING from SmartSuite)
+// SmartSuite option ID -> normalized label (for READING from SmartSuite)
 const EVIDENCE_TYPE_OPTIONS: Record<string, string> = {
-  'mVsNo': 'Before Photo',
-  'FTVO5': 'After Photo',
-  'RvRbr': 'Meter Reading',
-  '3jYOf': 'Test Result',
-  'Q5wfk': 'Label Photo',
-  'nLeez': 'Certificate Photo',
-  'YFZBw': 'Client Signature',
-  'cN18H': 'Wiring Photo',
-  '1YrTO': 'Distribution Board',
-  'F826r': 'Earthing Arrangement',
-  'YIrMi': 'Bonding Connection',
-  'E2lOv': 'RCD Test Reading',
-  'sMhQ9': 'Insulation Test Reading',
-  '1M3gg': 'Continuity Reading',
-  'nZKk1': 'ZS Reading',
-  'XNwfW': 'Additional Evidence',
+  'mVsNo': 'existing_board_condition',
+  'FTVO5': 'isolation_confirmation',
+  'RvRbr': 'new_board_installed',
+  '3jYOf': 'main_earth_bonding',
+  'Q5wfk': 'completed_installation',
+  'nLeez': 'cable_route',
+  'YFZBw': 'containment',
+  'cN18H': 'connection_points',
+  '1YrTO': 'db_photo',
+  'F826r': 'sample_circuit_tests',
+  'E2lOv': 'defects_found',
+  'sMhQ9': 'luminaire_photo',
+  '1M3gg': 'battery_test_readings',
+  'nZKk1': 'logbook_entry',
+  'XNwfW': 'panel_photo',
+  'jSpIt': 'device_test_log',
+  'CxWPt': 'call_point_activation',
+  'gLnR1': 'location_photo',
+  'XMyuc': 'protective_device',
+  'SfzfC': 'dno_notification',
+  '3FyTK': 'initial_fault_indication',
+  'dvGWa': 'investigation_photos',
+  '8aZOR': 'resolution',
+  'zHfbD': 'test_confirmation',
+  'x0eqD': 'equipment_photo',
+  'hRjl8': 'location_compliance',
+  'xaQrd': 'alarm_photo',
+  'xKIP1': 'test_activation',
+  'fDfmf': 'array_location',
+  'YO3iv': 'inverter',
+  '708g2': 'ac_dc_isolators',
+  'OJe8U': 'g98_g99_submission',
+  'KtV9n': 'dno_acceptance',
+  '537Fm': 'zone_identification',
+  '5ZTN3': 'rcd_protection',
+  'ShjqB': 'bonding_connections',
+  'fCB6P': 'circuit_layout',
+  'SivU5': 'isolation_switch',
+  'XjFcs': 'device_locations',
+  '42Gf9': 'camera_locations',
+  's4R4Q': 'recorder_location',
+  '4hldz': 'before_photo',
+  'bPV1p': 'after_photo',
+  'uR5fB': 'test_meter_readings',
+  'yoJ7D': 'test_result',
+  '1VlrY': 'certificate_photo',
+  'c7LhE': 'labelling',
+  'X3Lrf': 'test_instrument_calibration',
+  'qytQX': 'earthing_arrangement',
+  'f2QeD': 'wiring_photo',
+  'Dxpai': 'additional_evidence',
 }
 
 // Photo Stage option ID -> label (for READING from SmartSuite)
 const PHOTO_STAGE_OPTIONS: Record<string, string> = {
-  'DZX3Z': 'Before',
-  'U6zl3': 'After',
-  'Mw4Rd': 'During',
+  'DZX3Z': 'before',
+  'U6zl3': 'after',
+  'Mw4Rd': 'during',
 }
 
 // Reverse mapping: evidence type string -> SmartSuite option ID (for WRITING to SmartSuite)
 const EVIDENCE_TYPE_TO_OPTION_ID: Record<string, string> = {
-  'before_photo': 'mVsNo',
-  'after_photo': 'FTVO5',
-  'meter_reading': 'RvRbr',
-  'test_meter_readings': 'RvRbr',
-  'test_result': '3jYOf',
-  'label_photo': 'Q5wfk',
-  'label_applied': 'Q5wfk',
-  'certificate_photo': 'nLeez',
-  'client_signature': 'YFZBw',
-  'wiring_photo': 'cN18H',
-  'distribution_board': '1YrTO',
-  'db_photo': '1YrTO',
-  'earthing_arrangement': 'F826r',
-  'bonding_connection': 'YIrMi',
-  'bonding_connections': 'YIrMi',
-  'rcd_test_reading': 'E2lOv',
-  'rcd_protection': 'E2lOv',
-  'insulation_test_reading': 'sMhQ9',
-  'continuity_reading': '1M3gg',
-  'zs_reading': 'nZKk1',
-  'additional_evidence': 'XNwfW',
-  // Map common task evidence types to appropriate options
   'existing_board_condition': 'mVsNo',
-  'isolation_confirmation': 'mVsNo',
-  'new_board_installed': 'FTVO5',
-  'main_earth_bonding': 'F826r',
-  'completed_installation': 'FTVO5',
-  'equipment_photo': 'mVsNo',
-  'initial_fault_indication': 'mVsNo',
-  'investigation_photos': 'mVsNo',
-  'resolution': 'FTVO5',
-  'test_confirmation': '3jYOf',
-  'location_photo': 'mVsNo',
-  'protective_device': 'mVsNo',
-  'cable_route': 'cN18H',
+  'isolation_confirmation': 'FTVO5',
+  'new_board_installed': 'RvRbr',
+  'main_earth_bonding': '3jYOf',
+  'completed_installation': 'Q5wfk',
+  'cable_route': 'nLeez',
+  'containment': 'YFZBw',
   'connection_points': 'cN18H',
-  'containment': 'cN18H',
-  'labelling': 'Q5wfk',
-  'sample_circuit_tests': '3jYOf',
-  'test_instrument_calibration': '3jYOf',
-  'defects_found': 'mVsNo',
-  'zone_identification': 'mVsNo',
-  'circuit_layout': 'cN18H',
-  'isolation_switch': 'mVsNo',
-  'device_locations': 'mVsNo',
-  'camera_locations': 'mVsNo',
-  'recorder_location': 'mVsNo',
-  // Emergency lighting / Fire alarm
-  'luminaire_photo': 'mVsNo',
-  'battery_test_readings': '3jYOf',
-  'logbook_entry': 'nLeez',
-  'panel_photo': 'mVsNo',
-  'device_test_log': '3jYOf',
-  'call_point_activation': '3jYOf',
-  // EV / Solar
-  'dno_notification': 'nLeez',
-  'array_location': 'mVsNo',
-  'inverter': 'mVsNo',
-  'ac_dc_isolators': 'mVsNo',
-  'g98_g99_submission': 'nLeez',
-  'dno_acceptance': 'nLeez',
-  // Smoke/CO
-  'location_compliance': 'mVsNo',
-  'alarm_photo': 'mVsNo',
-  'test_activation': '3jYOf',
+  'db_photo': '1YrTO',
+  'sample_circuit_tests': 'F826r',
+  'defects_found': 'E2lOv',
+  'luminaire_photo': 'sMhQ9',
+  'battery_test_readings': '1M3gg',
+  'logbook_entry': 'nZKk1',
+  'panel_photo': 'XNwfW',
+  'device_test_log': 'jSpIt',
+  'call_point_activation': 'CxWPt',
+  'location_photo': 'gLnR1',
+  'protective_device': 'XMyuc',
+  'dno_notification': 'SfzfC',
+  'initial_fault_indication': '3FyTK',
+  'investigation_photos': 'dvGWa',
+  'resolution': '8aZOR',
+  'test_confirmation': 'zHfbD',
+  'equipment_photo': 'x0eqD',
+  'location_compliance': 'hRjl8',
+  'alarm_photo': 'xaQrd',
+  'test_activation': 'xKIP1',
+  'array_location': 'fDfmf',
+  'inverter': 'YO3iv',
+  'ac_dc_isolators': '708g2',
+  'g98_g99_submission': 'OJe8U',
+  'dno_acceptance': 'KtV9n',
+  'zone_identification': '537Fm',
+  'rcd_protection': '5ZTN3',
+  'bonding_connections': 'ShjqB',
+  'circuit_layout': 'fCB6P',
+  'isolation_switch': 'SivU5',
+  'device_locations': 'XjFcs',
+  'camera_locations': '42Gf9',
+  'recorder_location': 's4R4Q',
+  'before_photo': '4hldz',
+  'after_photo': 'bPV1p',
+  'test_meter_readings': 'uR5fB',
+  'test_result': 'yoJ7D',
+  'certificate_photo': '1VlrY',
+  'labelling': 'c7LhE',
+  'label_applied': 'c7LhE',
+  'test_instrument_calibration': 'X3Lrf',
+  'earthing_arrangement': 'qytQX',
+  'wiring_photo': 'f2QeD',
+  'additional_evidence': 'Dxpai',
 }
 
 // Reverse mapping: photo stage string -> SmartSuite option ID (for WRITING to SmartSuite)
@@ -128,11 +150,12 @@ function getEvidenceTypeOptionId(evidenceType: string): string {
   const normalized = evidenceType.toLowerCase().replace(/\s+/g, '_')
   const optionId = EVIDENCE_TYPE_TO_OPTION_ID[normalized]
   if (optionId) {
+    console.log('[EVIDENCE] Mapped evidence type:', evidenceType, '->', optionId)
     return optionId
   }
   // Log unknown type and default to Additional Evidence
-  console.log('[EVIDENCE] Unknown evidence type for creation:', evidenceType, '- defaulting to additional_evidence')
-  return EVIDENCE_TYPE_TO_OPTION_ID['additional_evidence'] || 'XNwfW'
+  console.log('[EVIDENCE] Unknown evidence type:', evidenceType, '- defaulting to additional_evidence')
+  return EVIDENCE_TYPE_TO_OPTION_ID['additional_evidence'] || 'Dxpai'
 }
 
 // Helper: Convert photo stage string to SmartSuite option ID
@@ -142,8 +165,7 @@ function getPhotoStageOptionId(photoStage: string): string {
   if (optionId) {
     return optionId
   }
-  // Log unknown stage and default to Before
-  console.log('[EVIDENCE] Unknown photo stage for creation:', photoStage, '- defaulting to before')
+  console.log('[EVIDENCE] Unknown photo stage:', photoStage, '- defaulting to before')
   return PHOTO_STAGE_TO_OPTION_ID['before'] || 'DZX3Z'
 }
 
@@ -281,7 +303,7 @@ async function verifyTaskOwnership(taskId: string, clerkId: string): Promise<boo
   }
 }
 
-// Helper: Extract single select value from SmartSuite format (option ID -> label)
+// Helper: Extract single select value from SmartSuite format (option ID -> normalized string)
 function extractSingleSelectValue(field: unknown, optionMap: Record<string, string>): string | null {
   if (!field) return null
   
@@ -289,14 +311,14 @@ function extractSingleSelectValue(field: unknown, optionMap: Record<string, stri
   if (typeof field === 'string') {
     // Try to look up in option map first
     if (optionMap[field]) {
-      return optionMap[field].toLowerCase().replace(/\s+/g, '_')
+      return optionMap[field]
     }
     // Log unknown option IDs so we can add them
     if (/^[a-zA-Z0-9]{5,6}$/.test(field)) {
       console.log('[EVIDENCE] Unknown option ID:', field, '- please add to mapping')
       return null
     }
-    // It's already a readable label
+    // It's already a readable label - normalize it
     return field.toLowerCase().replace(/\s+/g, '_')
   }
   
@@ -309,7 +331,7 @@ function extractSingleSelectValue(field: unknown, optionMap: Record<string, stri
     if (obj.value && typeof obj.value === 'string') {
       // Try to look up value in option map
       if (optionMap[obj.value]) {
-        return optionMap[obj.value].toLowerCase().replace(/\s+/g, '_')
+        return optionMap[obj.value]
       }
       if (!/^[a-zA-Z0-9]{5,6}$/.test(obj.value)) {
         return obj.value.toLowerCase().replace(/\s+/g, '_')
@@ -347,10 +369,13 @@ function transformEvidence(item: Record<string, unknown>): Record<string, unknow
     isSynced = (obj.completed_items as number) > 0
   }
 
+  const evidenceType = extractSingleSelectValue(item[EVIDENCE_FIELDS.evidence_type], EVIDENCE_TYPE_OPTIONS)
+  console.log('[EVIDENCE] Transform - raw:', item[EVIDENCE_FIELDS.evidence_type], '-> normalized:', evidenceType)
+
   return {
     id: item.id,
     taskId: taskId || null,
-    evidenceType: extractSingleSelectValue(item[EVIDENCE_FIELDS.evidence_type], EVIDENCE_TYPE_OPTIONS),
+    evidenceType: evidenceType,
     photoStage: extractSingleSelectValue(item[EVIDENCE_FIELDS.photo_stage], PHOTO_STAGE_OPTIONS),
     photoUrl: item[EVIDENCE_FIELDS.photo_url] || null,
     photoHash: item[EVIDENCE_FIELDS.photo_hash] || null,
@@ -624,14 +649,12 @@ evidence.post('/', async (c) => {
     const evidenceTypeOptionId = getEvidenceTypeOptionId(evidenceTypeRaw)
     const photoStageOptionId = photoStageRaw ? getPhotoStageOptionId(photoStageRaw) : undefined
 
-    console.log('[EVIDENCE] Parsed fields:', { 
+    console.log('[EVIDENCE] Creating with:', { 
       taskId, 
       evidenceTypeRaw, 
       evidenceTypeOptionId,
       photoStageRaw, 
-      photoStageOptionId,
-      notes, 
-      photoUrl: photoUrl?.slice(0, 50) 
+      photoStageOptionId
     })
 
     // Validate required fields
@@ -661,7 +684,6 @@ evidence.post('/', async (c) => {
     // Add photo_stage if provided
     if (photoStageOptionId) {
       evidenceData[EVIDENCE_FIELDS.photo_stage] = photoStageOptionId
-      console.log('[EVIDENCE] Adding photo_stage option ID:', photoStageOptionId)
     }
 
     // Add notes if provided
@@ -689,7 +711,7 @@ evidence.post('/', async (c) => {
 
     const transformed = transformEvidence(newEvidence as unknown as Record<string, unknown>)
     
-    console.log('[EVIDENCE] Created evidence:', transformed.id)
+    console.log('[EVIDENCE] Created evidence:', transformed.id, 'with type:', transformed.evidenceType)
     return c.json(transformed, 201)
   } catch (error) {
     console.error('[EVIDENCE] Error creating evidence:', error)
@@ -734,4 +756,3 @@ evidence.delete('/:id', async (c) => {
 })
 
 export default evidence
-
