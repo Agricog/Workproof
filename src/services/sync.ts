@@ -129,20 +129,21 @@ async function syncEvidence(token: string): Promise<void> {
     
     try {
       const response = await evidenceApi.upload(
-        item.taskId,
-        {
-          evidenceType: item.evidenceType,
-          photoStage: item.photoStage || undefined,
-          photoData: item.photoData,
-          thumbnailData: item.thumbnailData,
-          hash: item.hash,
-          capturedAt: item.capturedAt,
-          latitude: item.latitude,
-          longitude: item.longitude,
-          accuracy: item.accuracy,
-        },
-        token
-      )
+  item.taskId,
+  {
+    evidenceType: item.evidenceType,
+    photoStage: item.photoStage || undefined,
+    notes: item.notes || undefined,
+    photoData: item.photoData,
+    thumbnailData: item.thumbnailData,
+    hash: item.hash,
+    capturedAt: item.capturedAt,
+    latitude: item.latitude,
+    longitude: item.longitude,
+    accuracy: item.accuracy,
+  },
+  token
+)
 
       if (response.data) {
         await markEvidenceSynced(item.id)
