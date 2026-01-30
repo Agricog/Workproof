@@ -95,6 +95,20 @@ export type TaskType =
   | 'outdoor_lighting'
   | 'data_cabling'
   | 'general_maintenance'
+  // New task types
+  | 'bathroom_installation'
+  | 'kitchen_installation'
+  | 'electric_shower_install'
+  | 'socket_installation'
+  | 'lighting_installation'
+  | 'extractor_fan_install'
+  | 'storage_heater_install'
+  | 'immersion_heater_install'
+  | 'security_system_install'
+  | 'cctv_installation'
+  | 'landlord_certificate'
+  | 'minor_works'
+  | 'custom'
 
 export interface TaskTypeConfig {
   id: TaskType
@@ -165,6 +179,15 @@ export type EvidenceType =
   | 'before_photo'
   | 'after_photo'
   | 'additional_evidence'
+  // New evidence types for new task types
+  | 'zone_identification'
+  | 'rcd_protection'
+  | 'bonding_connections'
+  | 'circuit_layout'
+  | 'isolation_switch'
+  | 'device_locations'
+  | 'camera_locations'
+  | 'recorder_location'
 
 // ============================================================================
 // PHOTO STAGE - When the photo was taken
@@ -320,5 +343,14 @@ export const EVIDENCE_TYPE_LABELS: Record<EvidenceType, string> = {
   // General
   before_photo: 'Before Photo',
   after_photo: 'After Photo',
-  additional_evidence: 'Additional Evidence'
+  additional_evidence: 'Additional Evidence',
+  // New evidence types
+  zone_identification: 'Zone Identification',
+  rcd_protection: 'RCD Protection',
+  bonding_connections: 'Bonding Connections',
+  circuit_layout: 'Circuit Layout',
+  isolation_switch: 'Isolation Switch',
+  device_locations: 'Device Locations',
+  camera_locations: 'Camera Locations',
+  recorder_location: 'Recorder Location',
 }
