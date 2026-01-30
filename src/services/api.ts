@@ -294,32 +294,69 @@ export const evidenceApi = {
 export const auditPackApi = {
   listByJob: async (jobId: string, token?: string | null): Promise<ApiResponse<Array<{
     id: string
-    job_id: string
+    job: string
     generated_at: string
     pdf_url?: string
     evidence_count: number
     hash: string
   }>>> => {
-    return apiRequest(`/api/audit-packs?job_id=${jobId}`, {}, token)
+    return apiRequest(`/api/audit-packs/job/${jobId}`, {}, token)
   },
 
   generate: async (jobId: string, token?: string | null): Promise<ApiResponse<{
     id: string
-    job_id: string
+    job: string
     generated_at: string
     evidence_count: number
     hash: string
+    summary: {
+      jobTitle: string
+      address: string
+      postcode: string
+      clientName: string
+      taskCount: number
+      evidenceCount: number
+      completedTasks: number
+    }
   }>> => {
     return apiRequest('/api/audit-packs/generate', {
       method: 'POST',
-      body: JSON.stringify({ job_id: jobId }),
+      body: JSON.stringify({ job: jobId }),
     }, token)
   },
 
-  share: async (id: string, email: string, token?: string | null): Promise<ApiResponse<{ success: boolean }>> => {
-    return apiRequest(`/api/audit-packs/${id}/share`, {
+  get: async (packId: string, token?: string | null): Promise<ApiResponse<{
+    id: string
+    job: string
+    generated_at: string
+    pdf_url?: string
+    evidence_count: number
+    hash: string
+    downloaded_at?: string
+    shared_with?: string
+  }>> => {
+    return apiRequest(`/api/audit-packs/${packId}`, {}, token)
+  },
+
+  markDownloaded: async (packId: string, token?: string | null): Promise<ApiResponse<{
+    id: string
+    downloaded_at: string
+  }>> => {
+    return apiRequest(`/api/audit-packs/${packId}/downloaded`, {
+      method: 'POST',
+    }, token)
+  },
+
+  share: async (packId: string, email: string, token?: string | null): Promise<ApiResponse<{ success: boolean; message: string }>> => {
+    return apiRequest(`/api/audit-packs/${packId}/share`, {
       method: 'POST',
       body: JSON.stringify({ email }),
+    }, token)
+  },
+
+  delete: async (packId: string, token?: string | null): Promise<ApiResponse<{ success: boolean }>> => {
+    return apiRequest(`/api/audit-packs/${packId}`, {
+      method: 'DELETE',
     }, token)
   },
 }
