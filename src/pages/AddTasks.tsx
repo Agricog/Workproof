@@ -96,11 +96,7 @@ export default function AddTasks() {
         return
       }
 
-      trackEvent('tasks_added', {
-        job_id: jobId,
-        task_count: taskTypesArray.length,
-        task_types: taskTypesArray.join(',')
-      })
+      trackEvent('tasks_added')
 
       // Navigate back to job detail
       navigate(`/jobs/${jobId}`)
