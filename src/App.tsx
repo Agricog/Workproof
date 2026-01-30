@@ -17,6 +17,7 @@ const AuditPacks = lazy(() => import('./pages/AuditPacks'))
 const Packs = lazy(() => import('./pages/Packs'))
 const PackPreview = lazy(() => import('./pages/PackPreview'))
 const Settings = lazy(() => import('./pages/Settings'))
+const Profile = lazy(() => import('./pages/Profile'))
 
 // Loading spinner
 function LoadingSpinner() {
@@ -144,6 +145,14 @@ export default function App() {
                 </Layout>
               }
             />
+            <Route
+              path="/profile"
+              element={
+                <Layout>
+                  <Profile />
+                </Layout>
+              }
+            />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
@@ -251,6 +260,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <Settings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/profile"
+              element={
+                <ProtectedRoute>
+                  <Profile />
                 </ProtectedRoute>
               }
             />
