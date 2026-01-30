@@ -292,24 +292,60 @@ function transformTask(record: Record<string, unknown>): Record<string, unknown>
   }
 }
 
-// Evidence type option ID to label mapping
+// Evidence type option ID to normalized label mapping (for READING from SmartSuite)
+// Complete mapping with all 51 evidence types
 const EVIDENCE_TYPE_OPTIONS: Record<string, string> = {
-  'mVsNo': 'before photo',
-  'FTVO5': 'after photo',
-  'RvRbr': 'meter reading',
-  '3jYOf': 'test result',
-  'Q5wfk': 'label photo',
-  'nLeez': 'certificate photo',
-  'YFZBw': 'client signature',
-  'cN18H': 'wiring photo',
-  '1YrTO': 'distribution board',
-  'F826r': 'earthing arrangement',
-  'YIrMi': 'bonding connection',
-  'E2lOv': 'rcd test reading',
-  'sMhQ9': 'insulation test reading',
-  '1M3gg': 'continuity reading',
-  'nZKk1': 'zs reading',
-  'XNwfW': 'additional evidence',
+  'mVsNo': 'existing_board_condition',
+  'FTVO5': 'isolation_confirmation',
+  'RvRbr': 'new_board_installed',
+  '3jYOf': 'main_earth_bonding',
+  'Q5wfk': 'completed_installation',
+  'nLeez': 'cable_route',
+  'YFZBw': 'containment',
+  'cN18H': 'connection_points',
+  '1YrTO': 'db_photo',
+  'F826r': 'sample_circuit_tests',
+  'E2lOv': 'defects_found',
+  'sMhQ9': 'luminaire_photo',
+  '1M3gg': 'battery_test_readings',
+  'nZKk1': 'logbook_entry',
+  'XNwfW': 'panel_photo',
+  'jSpIt': 'device_test_log',
+  'CxWPt': 'call_point_activation',
+  'gLnR1': 'location_photo',
+  'XMyuc': 'protective_device',
+  'SfzfC': 'dno_notification',
+  '3FyTK': 'initial_fault_indication',
+  'dvGWa': 'investigation_photos',
+  '8aZOR': 'resolution',
+  'zHfbD': 'test_confirmation',
+  'x0eqD': 'equipment_photo',
+  'hRjl8': 'location_compliance',
+  'xaQrd': 'alarm_photo',
+  'xKIP1': 'test_activation',
+  'fDfmf': 'array_location',
+  'YO3iv': 'inverter',
+  '708g2': 'ac_dc_isolators',
+  'OJe8U': 'g98_g99_submission',
+  'KtV9n': 'dno_acceptance',
+  '537Fm': 'zone_identification',
+  '5ZTN3': 'rcd_protection',
+  'ShjqB': 'bonding_connections',
+  'fCB6P': 'circuit_layout',
+  'SivU5': 'isolation_switch',
+  'XjFcs': 'device_locations',
+  '42Gf9': 'camera_locations',
+  's4R4Q': 'recorder_location',
+  '4hldz': 'before_photo',
+  'bPV1p': 'after_photo',
+  'uR5fB': 'test_meter_readings',
+  'yoJ7D': 'test_result',
+  '1VlrY': 'certificate_photo',
+  'c7LhE': 'labelling',
+  'X3Lrf': 'test_instrument_calibration',
+  'qytQX': 'earthing_arrangement',
+  'f2QeD': 'wiring_photo',
+  'Dxpai': 'additional_evidence',
 }
 
 // Photo stage option ID to label mapping
@@ -342,7 +378,7 @@ function extractSingleSelectValue(
   if (!rawValue) return null
 
   if (optionMap && optionMap[rawValue]) {
-    return optionMap[rawValue].toLowerCase().replace(/\s+/g, '_')
+    return optionMap[rawValue]
   }
 
   if (/^[a-zA-Z0-9]{5,6}$/.test(rawValue)) {
@@ -566,7 +602,6 @@ tasks.get('/:id', async (c) => {
 
     const transformed = transformTask(task as unknown as Record<string, unknown>)
     console.log('[TASKS] Returning transformed task')
-
     return c.json(transformed)
   } catch (error) {
     console.error('[TASKS] Error fetching task:', error)
@@ -583,7 +618,6 @@ tasks.post('/', async (c) => {
 
   try {
     const body = await c.req.json() as Record<string, unknown>
-
     const jobId = (body.job || body.job_id) as string
     const taskType = (body.task_type || body.taskType) as string
 
@@ -601,8 +635,8 @@ tasks.post('/', async (c) => {
     const jobTasks = tasksResult.items.filter(item =>
       taskBelongsToJob(item as unknown as Record<string, unknown>, jobId)
     )
-    const nextOrder = jobTasks.length + 1
 
+    const nextOrder = jobTasks.length + 1
     const title = (body.title as string) || `${taskType.replace(/_/g, ' ')} - Task ${nextOrder}`
 
     // Convert task type string to SmartSuite option ID
@@ -623,7 +657,6 @@ tasks.post('/', async (c) => {
     )
 
     const transformed = transformTask(newTask as unknown as Record<string, unknown>)
-
     return c.json(transformed, 201)
   } catch (error) {
     console.error('[TASKS] Error creating task:', error)
@@ -657,8 +690,8 @@ tasks.post('/bulk', async (c) => {
     const existingTasks = tasksResult.items.filter(item =>
       taskBelongsToJob(item as unknown as Record<string, unknown>, jobId)
     )
-    let nextOrder = existingTasks.length + 1
 
+    let nextOrder = existingTasks.length + 1
     const createdTasks: Record<string, unknown>[] = []
 
     for (const taskType of taskTypes) {
@@ -748,7 +781,6 @@ tasks.put('/:id', async (c) => {
     )
 
     const transformed = transformTask(updatedTask as unknown as Record<string, unknown>)
-
     return c.json(transformed)
   } catch (error) {
     console.error('[TASKS] Error updating task:', error)
