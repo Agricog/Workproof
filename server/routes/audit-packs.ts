@@ -70,7 +70,7 @@ auditPacks.get('/job/:jobId', async (c) => {
     const result = await client.listRecords<AuditPack>(TABLES.AUDIT_PACKS, {
       filter: {
         operator: 'and',
-        fields: [{ field: AUDIT_PACK_FIELDS.job, comparison: 'is', value: jobId }]
+        fields: [{ field: AUDIT_PACK_FIELDS.job, comparison: 'has_any_of', value: [jobId] }]
       },
       sort: [{ field: AUDIT_PACK_FIELDS.generated_at, direction: 'desc' }]
     })
@@ -158,11 +158,11 @@ auditPacks.post('/generate', strictRateLimitMiddleware, async (c) => {
     const jobPostcode = (job[JOB_FIELDS.postcode as keyof Job] as string) || ''
     const clientName = (job[JOB_FIELDS.client_name as keyof Job] as string) || ''
 
-    // Get all tasks for the job
+    // Get all tasks for the job (linked record uses has_any_of)
     const tasksResult = await client.listRecords<Task>(TABLES.TASKS, {
       filter: {
         operator: 'and',
-        fields: [{ field: TASK_FIELDS.job, comparison: 'is', value: body.job }]
+        fields: [{ field: TASK_FIELDS.job, comparison: 'has_any_of', value: [body.job] }]
       },
       sort: [{ field: TASK_FIELDS.order, direction: 'asc' }]
     })
@@ -175,7 +175,7 @@ auditPacks.post('/generate', strictRateLimitMiddleware, async (c) => {
       const evidenceResult = await client.listRecords<Evidence>(TABLES.EVIDENCE, {
         filter: {
           operator: 'and',
-          fields: [{ field: EVIDENCE_FIELDS.task, comparison: 'is', value: taskId }]
+          fields: [{ field: EVIDENCE_FIELDS.task, comparison: 'has_any_of', value: [taskId] }]
         },
         sort: [{ field: EVIDENCE_FIELDS.captured_at, direction: 'asc' }]
       })
@@ -271,7 +271,7 @@ auditPacks.get('/:id/full', async (c) => {
     const tasksResult = await client.listRecords<Task>(TABLES.TASKS, {
       filter: {
         operator: 'and',
-        fields: [{ field: TASK_FIELDS.job, comparison: 'is', value: jobId }]
+        fields: [{ field: TASK_FIELDS.job, comparison: 'has_any_of', value: [jobId] }]
       },
       sort: [{ field: TASK_FIELDS.order, direction: 'asc' }]
     })
@@ -282,7 +282,7 @@ auditPacks.get('/:id/full', async (c) => {
         const evidenceResult = await client.listRecords<Evidence>(TABLES.EVIDENCE, {
           filter: {
             operator: 'and',
-            fields: [{ field: EVIDENCE_FIELDS.task, comparison: 'is', value: task.id }]
+            fields: [{ field: EVIDENCE_FIELDS.task, comparison: 'has_any_of', value: [task.id] }]
           },
           sort: [{ field: EVIDENCE_FIELDS.captured_at, direction: 'asc' }]
         })
