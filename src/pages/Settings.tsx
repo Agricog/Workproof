@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
 import { useAuth } from '@clerk/clerk-react'
 import {
@@ -26,6 +27,7 @@ interface SettingsLink {
 }
 
 export default function Settings() {
+  const navigate = useNavigate()
   const { getToken } = useAuth()
   const [storageUsed, setStorageUsed] = useState(0)
   const [storageQuota, setStorageQuota] = useState(0)
@@ -66,7 +68,6 @@ export default function Settings() {
     if (!confirm('Are you sure you want to clear all local data? This cannot be undone.')) {
       return
     }
-
     setIsClearing(true)
     try {
       await clearAllData()
@@ -92,8 +93,8 @@ export default function Settings() {
     {
       icon: User,
       label: 'Profile',
-      description: 'Manage your account details',
-      action: () => {},
+      description: 'Company name, NICEIC number, phone',
+      action: () => navigate('/profile'),
     },
     {
       icon: Bell,
@@ -142,7 +143,7 @@ export default function Settings() {
           {/* Storage Section */}
           <div className="card">
             <h2 className="font-semibold text-gray-900 mb-4">Storage</h2>
-
+            
             <div className="mb-4">
               <div className="flex items-center justify-between text-sm mb-2">
                 <span className="text-gray-600">Used</span>
