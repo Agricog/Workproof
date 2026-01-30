@@ -107,8 +107,9 @@ export default function AddTasks() {
     }
   }
 
-  // Get all task types as entries
-  const allTaskTypes = Object.entries(TASK_TYPE_CONFIGS) as [TaskType, typeof TASK_TYPE_CONFIGS[TaskType]][]
+  // Get all task types as array of [key, config] tuples
+  const allTaskTypes: Array<[TaskType, typeof TASK_TYPE_CONFIGS[TaskType]]> = 
+    Object.keys(TASK_TYPE_CONFIGS).map(key => [key as TaskType, TASK_TYPE_CONFIGS[key as TaskType]])
 
   // Filter out already existing tasks
   const availableTaskTypes = allTaskTypes.filter(([key]) => !existingTaskTypes.has(key))
