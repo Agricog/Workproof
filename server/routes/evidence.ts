@@ -76,6 +76,13 @@ const EVIDENCE_TYPE_OPTIONS: Record<string, string> = {
 }
 
 // Photo Stage option ID -> label (for READING from SmartSuite)
+const PHOTO_STAGE_OPTIONS: Record<string, string> = {
+  'DZX3Z': 'before',
+  'U6zl3': 'after',
+  'cDYca': 'during',
+}
+
+// Photo Stage label -> option ID (for WRITING to SmartSuite)
 const PHOTO_STAGE_TO_OPTION_ID: Record<string, string> = {
   'before': 'DZX3Z',
   'after': 'U6zl3',
@@ -136,13 +143,6 @@ const EVIDENCE_TYPE_TO_OPTION_ID: Record<string, string> = {
   'earthing_arrangement': 'qytQX',
   'wiring_photo': 'f2QeD',
   'additional_evidence': 'Dxpai',
-}
-
-// Reverse mapping: photo stage string -> SmartSuite option ID (for WRITING to SmartSuite)
-const PHOTO_STAGE_TO_OPTION_ID: Record<string, string> = {
-  'before': 'DZX3Z',
-  'after': 'U6zl3',
-  'during': 'Mw4Rd',
 }
 
 // Helper: Convert evidence type string to SmartSuite option ID
