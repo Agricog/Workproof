@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 import { trackPageView, trackError } from '../utils/analytics'
-import { jobsApi, tasksApi, evidenceApi } from '../services/api'
+import { jobsApi, tasksApi, evidenceApi, auditPackApi } from '../services/api'
 import { captureError } from '../utils/errorTracking'
 import { getTaskTypeConfig } from '../types/taskConfigs'
 import type { Job, Task, TaskType } from '../types/models'
@@ -172,13 +172,28 @@ export default function PackPreview() {
   }
 
   const generatePDF = async () => {
-    if (!job) return
+    if (!job || !jobId) return
     
     setIsGenerating(true)
-    setGeneratingStatus('Creating document...')
+    setGeneratingStatus('Creating audit pack record...')
+    
+    let auditPackId: string | null = null
     
     try {
-      // Create PDF document
+      const token = await getToken()
+      
+      // Step 1: Create audit pack record in SmartSuite
+      const auditPackResponse = await auditPackApi.generate(jobId, token)
+      if (auditPackResponse.error || !auditPackResponse.data) {
+        throw new Error(auditPackResponse.error || 'Failed to create audit pack record')
+      }
+      
+      auditPackId = auditPackResponse.data.id
+      const packHash = auditPackResponse.data.hash
+      
+      setGeneratingStatus('Creating document...')
+      
+      // Step 2: Create PDF document
       const pdfDoc = await PDFDocument.create()
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
       const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
@@ -394,6 +409,22 @@ export default function PackPreview() {
           font: font,
           color: rgb(0.3, 0.3, 0.3)
         })
+      })
+      
+      // Pack hash at bottom of cover page
+      page.drawText('Pack Hash (SHA-256):', {
+        x: 50,
+        y: 80,
+        size: 9,
+        font: font,
+        color: rgb(0.5, 0.5, 0.5)
+      })
+      page.drawText(packHash, {
+        x: 50,
+        y: 65,
+        size: 7,
+        font: font,
+        color: rgb(0.4, 0.4, 0.4)
       })
       
       // Page 2: Evidence Log
@@ -687,6 +718,11 @@ export default function PackPreview() {
       link.click()
       document.body.removeChild(link)
       URL.revokeObjectURL(url)
+      
+      // Step 3: Mark audit pack as downloaded
+      if (auditPackId) {
+        await auditPackApi.markDownloaded(auditPackId, token)
+      }
       
     } catch (err) {
       captureError(err, 'PackPreview.generatePDF')
