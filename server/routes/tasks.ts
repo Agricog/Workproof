@@ -639,7 +639,8 @@ tasks.post('/', async (c) => {
     )
 
     const nextOrder = jobTasks.length + 1
-    const title = (body.title as string) || `${taskType.replace(/_/g, ' ')} - Task ${nextOrder}`
+    // Generate unique title with job ID suffix and timestamp
+    const title = (body.title as string) || `${taskType.replace(/_/g, ' ')} - ${jobId.slice(-6)}-${Date.now()}`
 
     // Convert task type string to SmartSuite option ID
     const taskTypeOptionId = getTaskTypeOptionId(taskType)
@@ -697,7 +698,8 @@ tasks.post('/bulk', async (c) => {
     const createdTasks: Record<string, unknown>[] = []
 
     for (const taskType of taskTypes) {
-      const title = `${taskType.replace(/_/g, ' ')} - Task ${nextOrder}`
+      // Generate unique title with job ID suffix and timestamp
+      const title = `${taskType.replace(/_/g, ' ')} - ${jobId.slice(-6)}-${Date.now()}`
 
       // Convert task type string to SmartSuite option ID
       const taskTypeOptionId = getTaskTypeOptionId(taskType)
