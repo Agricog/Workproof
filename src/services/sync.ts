@@ -125,6 +125,8 @@ async function syncEvidence(token: string): Promise<void> {
   for (const item of unsyncedItems) {
     if (!item) continue
     
+    console.log('[SYNC] Evidence:', item.evidenceType, 'photoStage:', item.photoStage)
+    
     try {
       const response = await evidenceApi.upload(
         item.taskId,
