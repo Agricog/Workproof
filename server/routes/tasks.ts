@@ -161,7 +161,7 @@ function extractStatus(statusValue: unknown): string {
   return 'pending'
 }
 
-// Task type option ID to label mapping
+// Task type option ID to label mapping (for READING from SmartSuite)
 const TASK_TYPE_OPTIONS: Record<string, string> = {
   'GZf84': 'consumer_unit_replacement',
   '8WuQU': 'eicr_inspection',
@@ -191,6 +191,49 @@ const TASK_TYPE_OPTIONS: Record<string, string> = {
   'keBdW': 'landlord_certificate',
   'Ag6yQ': 'minor_works',
   'OSi8A': 'custom',
+}
+
+// Reverse mapping: task type string to option ID (for WRITING to SmartSuite)
+const TASK_TYPE_TO_OPTION_ID: Record<string, string> = {
+  'consumer_unit_replacement': 'GZf84',
+  'eicr_inspection': '8WuQU',
+  'new_circuit_installation': 'QYJ13',
+  'emergency_lighting_test': 'faGqR',
+  'fire_alarm_test': 'xT6A4',
+  'ev_charger_install': 'hSv6P',
+  'fault_finding': 'zVX12',
+  'pat_testing': 'EDcwW',
+  'smoke_co_alarm_install': 'HVNT7',
+  'solar_pv_install': 'OPEoa',
+  'rewire_full': 'YbUD2',
+  'rewire_partial': 'n74B8',
+  'outdoor_lighting': 'ZTbWj',
+  'data_cabling': 'nvHim',
+  'general_maintenance': 'LC7ux',
+  'bathroom_installation': 'THmsG',
+  'kitchen_installation': 'fjAYt',
+  'electric_shower_install': 'h1OT7',
+  'socket_installation': 'SWJDB',
+  'lighting_installation': 'cTo69',
+  'extractor_fan_install': 'rGASu',
+  'storage_heater_install': 'OrwYU',
+  'immersion_heater_install': '13rm4',
+  'security_system_install': 'dlV0y',
+  'cctv_installation': 'J7NUh',
+  'landlord_certificate': 'keBdW',
+  'minor_works': 'Ag6yQ',
+  'custom': 'OSi8A',
+}
+
+// Helper: Convert task type string to SmartSuite option ID
+function getTaskTypeOptionId(taskType: string): string {
+  const optionId = TASK_TYPE_TO_OPTION_ID[taskType]
+  if (optionId) {
+    return optionId
+  }
+  // Log unknown task type and default to general_maintenance
+  console.log('[TASKS] Unknown task type for creation:', taskType, '- defaulting to general_maintenance')
+  return TASK_TYPE_TO_OPTION_ID['general_maintenance'] || 'LC7ux'
 }
 
 // Helper: Extract task type value
@@ -560,12 +603,16 @@ tasks.post('/', async (c) => {
     )
     const nextOrder = jobTasks.length + 1
 
-    const title = (body.title as string) || `${taskType} - Task ${nextOrder}`
+    const title = (body.title as string) || `${taskType.replace(/_/g, ' ')} - Task ${nextOrder}`
+
+    // Convert task type string to SmartSuite option ID
+    const taskTypeOptionId = getTaskTypeOptionId(taskType)
+    console.log('[TASKS] Creating task with type:', taskType, '-> option ID:', taskTypeOptionId)
 
     const createData: Record<string, unknown> = {
       title,
       [TASK_FIELDS.job]: [jobId],
-      [TASK_FIELDS.task_type]: taskType,
+      [TASK_FIELDS.task_type]: taskTypeOptionId,
       [TASK_FIELDS.status]: 'pending',
       [TASK_FIELDS.order]: nextOrder,
       [TASK_FIELDS.notes]: (body.notes as string) || ''
@@ -617,10 +664,14 @@ tasks.post('/bulk', async (c) => {
     for (const taskType of taskTypes) {
       const title = `${taskType.replace(/_/g, ' ')} - Task ${nextOrder}`
 
+      // Convert task type string to SmartSuite option ID
+      const taskTypeOptionId = getTaskTypeOptionId(taskType)
+      console.log('[TASKS] Bulk creating task with type:', taskType, '-> option ID:', taskTypeOptionId)
+
       const createData: Record<string, unknown> = {
         title,
         [TASK_FIELDS.job]: [jobId],
-        [TASK_FIELDS.task_type]: taskType,
+        [TASK_FIELDS.task_type]: taskTypeOptionId,
         [TASK_FIELDS.status]: 'pending',
         [TASK_FIELDS.order]: nextOrder,
         [TASK_FIELDS.notes]: ''
