@@ -147,10 +147,11 @@ export default function TaskDetail() {
     setSelectedEvidenceType(null)
     setSelectedPhotoStage(null)
 
-    // Refresh task data to get updated evidence count
-    loadTaskData()
+    // Delay refresh to allow sync to complete
+    setTimeout(() => {
+      loadTaskData()
+    }, 2000)
   }
-
   const updateTaskStatus = async (status: TaskStatus) => {
     if (!task) return
 
