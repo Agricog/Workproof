@@ -10,7 +10,7 @@ import type { Job } from '../types/models'
 // API response shape for audit packs
 interface AuditPackResponse {
   id: string
-  job_id: string
+  job: string
   generated_at: string
   pdf_url?: string
   evidence_count: number
@@ -298,3 +298,4 @@ export default function AuditPacks() {
     </div>
   )
 }
+
