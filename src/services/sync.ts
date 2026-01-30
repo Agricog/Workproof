@@ -125,25 +125,25 @@ async function syncEvidence(token: string): Promise<void> {
   for (const item of unsyncedItems) {
     if (!item) continue
     
-    console.log('[SYNC] Evidence:', item.evidenceType, 'photoStage:', item.photoStage)
+    console.log('[SYNC] Evidence:', item.evidenceType, 'photoStage:', item.photoStage, 'notes:', item.notes ? 'yes' : 'no')
     
     try {
       const response = await evidenceApi.upload(
-  item.taskId,
-  {
-    evidenceType: item.evidenceType,
-    photoStage: item.photoStage || undefined,
-    notes: item.notes || undefined,
-    photoData: item.photoData,
-    thumbnailData: item.thumbnailData,
-    hash: item.hash,
-    capturedAt: item.capturedAt,
-    latitude: item.latitude,
-    longitude: item.longitude,
-    accuracy: item.accuracy,
-  },
-  token
-)
+        item.taskId,
+        {
+          evidenceType: item.evidenceType,
+          photoStage: item.photoStage || undefined,
+          notes: item.notes || undefined,
+          photoData: item.photoData,
+          thumbnailData: item.thumbnailData,
+          hash: item.hash,
+          capturedAt: item.capturedAt,
+          latitude: item.latitude,
+          longitude: item.longitude,
+          accuracy: item.accuracy,
+        },
+        token
+      )
 
       if (response.data) {
         await markEvidenceSynced(item.id)
@@ -224,6 +224,7 @@ async function processEvidenceSync(item: SyncQueueItem, token: string): Promise<
     taskId: string
     evidenceType: string
     photoStage?: string
+    notes?: string
     photoData: string
     thumbnailData: string
     hash: string
@@ -238,6 +239,7 @@ async function processEvidenceSync(item: SyncQueueItem, token: string): Promise<
     {
       evidenceType: data.evidenceType,
       photoStage: data.photoStage,
+      notes: data.notes,
       photoData: data.photoData,
       thumbnailData: data.thumbnailData,
       hash: data.hash,
@@ -323,6 +325,7 @@ export async function forceSyncNow(
           {
             evidenceType: item.evidenceType,
             photoStage: item.photoStage || undefined,
+            notes: item.notes || undefined,
             photoData: item.photoData,
             thumbnailData: item.thumbnailData,
             hash: item.hash,
