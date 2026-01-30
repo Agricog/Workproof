@@ -71,8 +71,10 @@ export default function TaskDetail() {
 
         const captured: Record<string, CapturedEvidenceInfo> = {}
         response.data.evidence.items.forEach((ev: { evidenceType?: string; photoStage?: string }) => {
+          console.log('[TaskDetail] Raw evidence item:', ev)
           if (ev.evidenceType) {
             const normalizedType = ev.evidenceType.toLowerCase().replace(/\s+/g, '_')
+            console.log('[TaskDetail] evidenceType:', ev.evidenceType, '→ normalized:', normalizedType)
             captured[normalizedType] = {
               captured: true,
               stage: ev.photoStage as PhotoStage
