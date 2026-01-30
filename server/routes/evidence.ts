@@ -73,6 +73,7 @@ const EVIDENCE_TYPE_MAP: Record<string, string> = {
   'investigation_photos': 'Before Photo',
   'resolution': 'After Photo',
   'test_confirmation': 'Test Result',
+  'additional_evidence': 'Additional Evidence',
 }
 
 // Map frontend photo stages to SmartSuite dropdown labels (for writing)
