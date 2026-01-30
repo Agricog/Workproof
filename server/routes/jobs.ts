@@ -317,11 +317,21 @@ jobs.post('/', async (c) => {
       [JOB_FIELDS.postcode]: postcode?.toUpperCase() || '',
       [JOB_FIELDS.client_name]: clientName,
       [JOB_FIELDS.status]: statusOptionId,
-      [JOB_FIELDS.start_date]: { date: formattedStartDate },
-      [JOB_FIELDS.created_at]: { date: createdAtDate }
+      [JOB_FIELDS.start_date]: formattedStartDate,
+      [JOB_FIELDS.created_at]: createdAtDate
     }
 
-    if (clientPhone) jobData[JOB_FIELDS.client_phone] = clientPhone
+    if (clientPhone) {
+  // Format as UK number for SmartSuite phone field
+  const formattedPhone = clientPhone.replace(/\s+/g, '')
+  if (formattedPhone.startsWith('0')) {
+    jobData[JOB_FIELDS.client_phone] = '+44' + formattedPhone.substring(1)
+  } else if (!formattedPhone.startsWith('+')) {
+    jobData[JOB_FIELDS.client_phone] = '+44' + formattedPhone
+  } else {
+    jobData[JOB_FIELDS.client_phone] = formattedPhone
+  }
+}
     if (clientEmail) jobData[JOB_FIELDS.client_email] = clientEmail
     if (notes) jobData[JOB_FIELDS.notes] = notes
 
