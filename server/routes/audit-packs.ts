@@ -209,6 +209,7 @@ auditPacks.post('/generate', strictRateLimitMiddleware, async (c) => {
 
     // Create audit pack record with SmartSuite field IDs
     const packData: Record<string, unknown> = {
+      title: `Audit Pack - ${clientName || jobTitle} - ${new Date().toLocaleDateString('en-GB')}`,
       [AUDIT_PACK_FIELDS.job]: [body.job], // Linked records are arrays
       [AUDIT_PACK_FIELDS.generated_at]: new Date().toISOString(),
       [AUDIT_PACK_FIELDS.evidence_count]: allEvidence.length,
