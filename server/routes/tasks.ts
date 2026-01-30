@@ -349,10 +349,11 @@ const EVIDENCE_TYPE_OPTIONS: Record<string, string> = {
 }
 
 // Photo stage option ID to label mapping
+// NEW (correct)
 const PHOTO_STAGE_OPTIONS: Record<string, string> = {
   'DZX3Z': 'before',
   'U6zl3': 'after',
-  'Mw4Rd': 'during',
+  'cDYca': 'during',
 }
 
 // Helper: Extract single select value with option ID mapping
