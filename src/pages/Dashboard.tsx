@@ -37,58 +37,64 @@ export default function Dashboard() {
   }, [])
 
   const loadDashboardData = async () => {
-    setIsLoading(true)
-    try {
-      // Get offline storage stats
-      const storageStats = await getStorageStats()
+  setIsLoading(true)
+  try {
+    // Get offline storage stats
+    const storageStats = await getStorageStats()
+    
+    // Fetch real jobs from API
+    const response = await fetch('/api/jobs', {
+      credentials: 'include'
+    })
+    
+    if (response.ok) {
+      const jobs: Job[] = await response.json()
+      const activeJobs = jobs.filter(j => j.status === 'active')
       
-      // TODO: Fetch from API when backend is ready
-      // For now, use placeholder data
+      // Calculate evidence count for this month
+      const thisMonth = new Date().getMonth()
+      const thisYear = new Date().getFullYear()
+      const evidenceThisMonth = jobs.reduce((total, job) => {
+        const jobDate = new Date(job.createdAt)
+        if (jobDate.getMonth() === thisMonth && jobDate.getFullYear() === thisYear) {
+          return total + (job.evidenceCount || 0)
+        }
+        return total + (job.evidenceCount || 0)
+      }, 0)
+      
       setStats({
-        activeJobs: 3,
-        evidenceThisMonth: storageStats.pendingCount || 12,
+        activeJobs: activeJobs.length,
+        evidenceThisMonth: evidenceThisMonth || storageStats.pendingCount || 0,
         pendingSync: storageStats.pendingCount || 0,
       })
-
-      // Placeholder recent jobs matching Job interface
-      setRecentJobs([
-        {
-          id: '1',
-          userId: 'user_1',
-          title: 'Consumer Unit Replacement',
-          address: '42 High Street, Bristol BS1 2AW',
-          postcode: 'BS1 2AW',
-          clientName: 'Mrs Johnson',
-          startDate: '2026-01-24',
-          status: 'active',
-          createdAt: '2026-01-24T09:00:00Z',
-          taskCount: 1,
-          evidenceCount: 4,
-        },
-        {
-          id: '2',
-          userId: 'user_1',
-          title: 'EICR Inspection',
-          address: 'The Crown Inn, Exeter EX1 1AA',
-          postcode: 'EX1 1AA',
-          clientName: 'Mr Davies',
-          startDate: '2026-01-22',
-          status: 'active',
-          createdAt: '2026-01-22T08:30:00Z',
-          taskCount: 2,
-          evidenceCount: 0,
-        },
-      ])
-    } catch (error) {
-      console.error('Failed to load dashboard data:', error)
-      trackError(
-        error instanceof Error ? error.name : 'unknown',
-        'dashboard_load'
-      )
-    } finally {
-      setIsLoading(false)
+      
+      // Show most recent active jobs (up to 5)
+      setRecentJobs(activeJobs.slice(0, 5))
+    } else {
+      // API error - show empty state
+      setStats({
+        activeJobs: 0,
+        evidenceThisMonth: storageStats.pendingCount || 0,
+        pendingSync: storageStats.pendingCount || 0,
+      })
+      setRecentJobs([])
     }
+  } catch (error) {
+    console.error('Failed to load dashboard data:', error)
+    trackError(
+      error instanceof Error ? error.name : 'unknown',
+      'dashboard_load'
+    )
+    setStats({
+      activeJobs: 0,
+      evidenceThisMonth: 0,
+      pendingSync: 0,
+    })
+    setRecentJobs([])
+  } finally {
+    setIsLoading(false)
   }
+}
 
   const firstName = user?.firstName || 'there'
 
