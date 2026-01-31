@@ -55,7 +55,7 @@ export default function Dashboard() {
       const thisMonth = new Date().getMonth()
       const thisYear = new Date().getFullYear()
       const evidenceThisMonth = jobs.reduce((total, job) => {
-        const jobDate = new Date(job.createdAt)
+        const jobDate = new Date(job.createdAt || Date.now())
         if (jobDate.getMonth() === thisMonth && jobDate.getFullYear() === thisYear) {
           return total + (job.evidenceCount || 0)
         }
