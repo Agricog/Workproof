@@ -147,6 +147,9 @@ async function syncEvidence(token: string): Promise<void> {
           testRcdTripTime: item.testRcdTripTime,
           testContinuity: item.testContinuity,
           testPolarity: item.testPolarity,
+          // Voice note
+          audioData: item.audioData,
+          audioTranscript: item.audioTranscript,
         },
         token
       )
@@ -243,6 +246,8 @@ async function processEvidenceSync(item: SyncQueueItem, token: string): Promise<
     testRcdTripTime?: number | null
     testContinuity?: number | null
     testPolarity?: 'pass' | 'fail' | null
+    audioData?: string | null
+    audioTranscript?: string | null
   }
 
   const response = await evidenceApi.upload(
@@ -263,6 +268,8 @@ async function processEvidenceSync(item: SyncQueueItem, token: string): Promise<
       testRcdTripTime: data.testRcdTripTime,
       testContinuity: data.testContinuity,
       testPolarity: data.testPolarity,
+      audioData: data.audioData,
+      audioTranscript: data.audioTranscript,
     },
     token
   )
@@ -355,6 +362,9 @@ export async function forceSyncNow(
             testRcdTripTime: item.testRcdTripTime,
             testContinuity: item.testContinuity,
             testPolarity: item.testPolarity,
+            // Voice note
+            audioData: item.audioData,
+            audioTranscript: item.audioTranscript,
           },
           token
         )
