@@ -50,7 +50,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<EmailResult>
       return { success: false, error: 'Failed to send email' }
     }
 
-    const data = await response.json()
+    const data = await response.json() as { id: string }
     console.log('[Email] Sent successfully:', data.id)
     return { success: true, messageId: data.id }
 
