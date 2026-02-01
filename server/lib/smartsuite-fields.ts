@@ -40,6 +40,7 @@ export const TASK_FIELDS = {
 
 export const EVIDENCE_FIELDS = {
   task: 's9d23ccc51',
+  job: 's662723b29',
   evidence_type: 'sc1907f924',
   photo_stage: 's15d91de07',
   photo_url: 'sed7082c34',
@@ -62,3 +63,4 @@ export const AUDIT_PACK_FIELDS = {
   downloaded_at: 'sdafb72e64',
   shared_with: 'sb0a19da8f'
 } as const
+
