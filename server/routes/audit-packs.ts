@@ -69,6 +69,20 @@ function evidenceBelongsToTask(record: Record<string, unknown>, taskId: string):
   return ids.includes(taskId)
 }
 
+/**
+ * Generate deterministic pack hash from evidence
+ * MUST match verify.ts computation exactly
+ */
+async function generatePackHash(evidenceItems: Record<string, unknown>[]): Promise<string> {
+  const hashes = evidenceItems
+    .map(ev => ev[EVIDENCE_FIELDS.photo_hash] as string || '')
+    .filter(h => h)
+    .sort()
+    .join('|')
+  
+  return generateHash(hashes)
+}
+
 // List audit packs for a job
 auditPacks.get('/job/:jobId', async (c) => {
   const auth = getAuth(c)
@@ -196,18 +210,10 @@ auditPacks.post('/generate', strictRateLimitMiddleware, async (c) => {
       return ids.some(id => taskIds.includes(id))
     })
 
-    // Generate pack hash from all evidence hashes
-    const evidenceHashes = allEvidence
-      .map(e => (e as unknown as Record<string, unknown>)[EVIDENCE_FIELDS.photo_hash] as string || '')
-      .filter(h => h)
-      .sort()
-      .join('')
-    
-    const packHash = await generateHash(
-      body.job + ':' + jobTitle + ':' + evidenceHashes + ':' + new Date().toISOString()
-    )
+    // Generate deterministic pack hash (must match verify.ts)
+    const packHash = await generatePackHash(allEvidence as unknown as Record<string, unknown>[])
 
-   // Create audit pack record with SmartSuite field IDs
+    // Create audit pack record with SmartSuite field IDs
     // Title includes hash prefix for uniqueness and audit traceability
     const generatedAt = new Date().toISOString()
     const packData: Record<string, unknown> = {
