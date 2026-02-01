@@ -219,18 +219,11 @@ export default function PhotoCapture({
   const transcribeAudio = async (blob: Blob) => {
     setIsTranscribing(true)
     try {
-      // Convert blob to base64
-      const reader = new FileReader()
-      const base64Promise = new Promise<string>((resolve, reject) => {
-        reader.onloadend = () => {
-          const base64 = reader.result as string
-          const parts = base64.split(',')
-          resolve(parts[1] || parts[0]) // Remove data URL prefix, fallback to full string
-        }
-        reader.onerror = () => reject(new Error('Failed to read audio'))
-      })
-      reader.readAsDataURL(blob)
-      const audioBase64 = await base64Promise
+      // Convert blob to base64 using existing utility
+      const audioBase64Full = await blobToBase64(blob)
+      // Remove data URL prefix if present
+      const commaIdx = audioBase64Full.indexOf(',')
+      const audioBase64 = commaIdx >= 0 ? audioBase64Full.slice(commaIdx + 1) : audioBase64Full
 
       // Send to backend for transcription
       const response = await fetch('/api/transcribe', {
