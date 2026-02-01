@@ -16,7 +16,9 @@ import {
   X,
   Loader2,
   AlertCircle,
-  QrCode
+  QrCode,
+  Mail,
+  CheckCircle
 } from 'lucide-react'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 import { trackPageView, trackError } from '../utils/analytics'
@@ -67,6 +69,12 @@ export default function PackPreview() {
   const [generatingStatus, setGeneratingStatus] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [selectedImage, setSelectedImage] = useState<EvidenceItem | null>(null)
+  const [showShareModal, setShowShareModal] = useState(false)
+  const [shareEmail, setShareEmail] = useState('')
+  const [isSharing, setIsSharing] = useState(false)
+  const [shareSuccess, setShareSuccess] = useState(false)
+  const [shareError, setShareError] = useState<string | null>(null)
+  const [lastGeneratedPackId, setLastGeneratedPackId] = useState<string | null>(null)
 
   useEffect(() => {
     trackPageView('/packs/preview', 'Pack Preview')
@@ -208,6 +216,9 @@ export default function PackPreview() {
       
       const auditPackId = auditPackResponse.data.id
       const packHash = auditPackResponse.data.hash
+      
+      // Store pack ID for sharing
+      setLastGeneratedPackId(auditPackId)
       
       // Generate verification URL and fetch QR code
       const verifyUrl = `https://workproof.co.uk/verify/${auditPackId}`
@@ -745,6 +756,54 @@ export default function PackPreview() {
     ? Math.round((evidence.length / totalRequired) * 100) 
     : 0
 
+  // Share audit pack via email
+  const handleShare = async () => {
+    if (!lastGeneratedPackId || !shareEmail) return
+    
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(shareEmail)) {
+      setShareError('Please enter a valid email address')
+      return
+    }
+    
+    setIsSharing(true)
+    setShareError(null)
+    
+    try {
+      const token = await getToken()
+      const API_BASE = import.meta.env.VITE_API_URL || ''
+      
+      const response = await fetch(`${API_BASE}/api/audit-packs/${lastGeneratedPackId}/share`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include',
+        body: JSON.stringify({ email: shareEmail })
+      })
+      
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to send email')
+      }
+      
+      setShareSuccess(true)
+      setTimeout(() => {
+        setShowShareModal(false)
+        setShareEmail('')
+        setShareSuccess(false)
+      }, 2000)
+      
+    } catch (err) {
+      captureError(err, 'PackPreview.handleShare')
+      setShareError(err instanceof Error ? err.message : 'Failed to send email')
+    } finally {
+      setIsSharing(false)
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
@@ -790,11 +849,22 @@ export default function PackPreview() {
             
             <h1 className="text-lg font-semibold text-white">Audit Pack Preview</h1>
             
-            <button
-              onClick={generatePDF}
-              disabled={isGenerating || evidence.length === 0}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg transition-colors"
-            >
+            <div className="flex items-center gap-2">
+              {lastGeneratedPackId && (
+                <button
+                  onClick={() => setShowShareModal(true)}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+                >
+                  <Mail className="w-4 h-4" />
+                  <span className="hidden sm:inline">Share</span>
+                </button>
+              )}
+              
+              <button
+                onClick={generatePDF}
+                disabled={isGenerating || evidence.length === 0}
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg transition-colors"
+              >
               {isGenerating ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -807,6 +877,7 @@ export default function PackPreview() {
                 </>
               )}
             </button>
+            </div>
           </div>
         </div>
         
@@ -1000,6 +1071,100 @@ export default function PackPreview() {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Share Modal */}
+      {showShareModal && (
+        <div 
+          className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
+          onClick={() => !isSharing && setShowShareModal(false)}
+        >
+          <div 
+            className="bg-gray-800 rounded-lg p-6 max-w-md w-full"
+            onClick={e => e.stopPropagation()}
+          >
+            {shareSuccess ? (
+              <div className="text-center py-4">
+                <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-white mb-2">Email Sent!</h3>
+                <p className="text-gray-400">Audit pack sent to {shareEmail}</p>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl font-semibold text-white">Share Audit Pack</h3>
+                  <button 
+                    onClick={() => setShowShareModal(false)}
+                    className="text-gray-400 hover:text-white"
+                    disabled={isSharing}
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+                
+                <p className="text-gray-400 mb-4">
+                  Send this audit pack with verification link to your client or assessor.
+                </p>
+                
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={shareEmail}
+                    onChange={(e) => {
+                      setShareEmail(e.target.value)
+                      setShareError(null)
+                    }}
+                    placeholder="client@example.com"
+                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    disabled={isSharing}
+                  />
+                </div>
+                
+                {shareError && (
+                  <div className="mb-4 p-3 bg-red-900/30 border border-red-500 rounded-lg">
+                    <p className="text-red-400 text-sm">{shareError}</p>
+                  </div>
+                )}
+                
+                <div className="bg-gray-700/50 rounded-lg p-4 mb-6">
+                  <p className="text-sm text-gray-400">
+                    <span className="text-green-400 font-medium">Includes:</span> Verification link, job details, and your contact info for replies.
+                  </p>
+                </div>
+                
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowShareModal(false)}
+                    className="flex-1 px-4 py-3 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                    disabled={isSharing}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleShare}
+                    disabled={isSharing || !shareEmail}
+                    className="flex-1 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                  >
+                    {isSharing ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      <>
+                        <Mail className="w-4 h-4" />
+                        Send Email
+                      </>
+                    )}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
