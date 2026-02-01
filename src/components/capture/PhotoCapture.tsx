@@ -3,7 +3,7 @@
  * Captures photos with GPS, timestamp, hash, photo stage, and notes for immutable evidence
  */
 import { useState, useEffect, useCallback } from 'react'
-import { Camera, X, RotateCcw, Check, MapPin, Clock, AlertCircle, FileText } from 'lucide-react'
+import { Camera, X, RotateCcw, Check, MapPin, Clock, AlertCircle, FileText, Zap } from 'lucide-react'
 import { useCamera } from '../../hooks/useCamera'
 import { useGeolocation } from '../../hooks/useGeolocation'
 import { compressImage, generateThumbnail, blobToBase64 } from '../../utils/compression'
@@ -14,6 +14,23 @@ import { trackEvidenceCaptured } from '../../utils/analytics'
 import type { EvidenceType, PhotoStage } from '../../types/models'
 import { PHOTO_STAGE_LABELS, PHOTO_STAGE_COLORS } from '../../types/models'
 import type { StoredEvidence } from '../../utils/indexedDB'
+
+// Evidence types that should show test result inputs
+const TEST_EVIDENCE_TYPES = [
+  'test_meter_readings',
+  'sample_circuit_tests',
+  'test_result',
+  'battery_test_readings',
+  'test_confirmation'
+]
+
+interface TestResults {
+  voltage: string
+  resistance: string
+  rcdTripTime: string
+  continuity: string
+  polarity: 'pass' | 'fail' | null
+}
 
 interface PhotoCaptureProps {
   taskId: string
@@ -62,6 +79,18 @@ export default function PhotoCapture({
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [storageWarning, setStorageWarning] = useState(false)
+  
+  // Test results state
+  const [testResults, setTestResults] = useState<TestResults>({
+    voltage: '',
+    resistance: '',
+    rcdTripTime: '',
+    continuity: '',
+    polarity: null
+  })
+  
+  // Check if this evidence type needs test results
+  const showTestResults = TEST_EVIDENCE_TYPES.includes(evidenceType)
 
   // Start camera and get location on mount
   useEffect(() => {
@@ -105,6 +134,13 @@ export default function PhotoCapture({
     setThumbnail(null)
     setNotes('')
     setSaveError(null)
+    setTestResults({
+      voltage: '',
+      resistance: '',
+      rcdTripTime: '',
+      continuity: '',
+      polarity: null
+    })
   }, [])
 
   const handleConfirm = useCallback(async () => {
@@ -150,6 +186,12 @@ export default function PhotoCapture({
         synced: false,
         syncedAt: null,
         createdAt: capturedAt,
+        // Test results (null if not applicable)
+        testVoltage: testResults.voltage ? parseFloat(testResults.voltage) : null,
+        testResistance: testResults.resistance ? parseFloat(testResults.resistance) : null,
+        testRcdTripTime: testResults.rcdTripTime ? parseFloat(testResults.rcdTripTime) : null,
+        testContinuity: testResults.continuity ? parseFloat(testResults.continuity) : null,
+        testPolarity: testResults.polarity,
       }
 
       // Save to IndexedDB
@@ -170,7 +212,7 @@ export default function PhotoCapture({
     } finally {
       setIsSaving(false)
     }
-  }, [capturedBlob, thumbnail, notes, taskId, jobId, evidenceType, photoStage, customName, workerId, location, onCapture])
+  }, [capturedBlob, thumbnail, notes, taskId, jobId, evidenceType, photoStage, customName, workerId, location, testResults, onCapture])
 
   // Display label - use customName if provided
   const displayLabel = customName || label
@@ -303,6 +345,94 @@ export default function PhotoCapture({
             />
           </div>
           <p className="text-gray-500 text-xs text-right mt-1">{notes.length}/500</p>
+        </div>
+      )}
+
+      {/* Test Results Input - shown for test evidence types */}
+      {capturedBlob && showTestResults && (
+        <div className="bg-gray-800 border-t border-gray-700 px-4 py-3">
+          <div className="flex items-center gap-2 mb-3">
+            <Zap className="w-5 h-5 text-amber-400" />
+            <span className="text-white font-medium text-sm">Test Results (optional)</span>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-gray-400 text-xs block mb-1">Voltage (V)</label>
+              <input
+                type="number"
+                step="0.1"
+                value={testResults.voltage}
+                onChange={(e) => setTestResults(prev => ({ ...prev, voltage: e.target.value }))}
+                placeholder="230.5"
+                className="w-full bg-gray-700 text-white placeholder-gray-500 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+            
+            <div>
+              <label className="text-gray-400 text-xs block mb-1">Resistance (Ω)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={testResults.resistance}
+                onChange={(e) => setTestResults(prev => ({ ...prev, resistance: e.target.value }))}
+                placeholder="0.45"
+                className="w-full bg-gray-700 text-white placeholder-gray-500 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+            
+            <div>
+              <label className="text-gray-400 text-xs block mb-1">RCD Trip (ms)</label>
+              <input
+                type="number"
+                step="1"
+                value={testResults.rcdTripTime}
+                onChange={(e) => setTestResults(prev => ({ ...prev, rcdTripTime: e.target.value }))}
+                placeholder="28"
+                className="w-full bg-gray-700 text-white placeholder-gray-500 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+            
+            <div>
+              <label className="text-gray-400 text-xs block mb-1">Continuity (Ω)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={testResults.continuity}
+                onChange={(e) => setTestResults(prev => ({ ...prev, continuity: e.target.value }))}
+                placeholder="0.12"
+                className="w-full bg-gray-700 text-white placeholder-gray-500 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+          </div>
+          
+          <div className="mt-3">
+            <label className="text-gray-400 text-xs block mb-2">Polarity</label>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setTestResults(prev => ({ ...prev, polarity: 'pass' }))}
+                className={`flex-1 py-2 rounded-lg font-medium text-sm transition-colors ${
+                  testResults.polarity === 'pass'
+                    ? 'bg-green-600 text-white'
+                    : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                }`}
+              >
+                ✓ Pass
+              </button>
+              <button
+                type="button"
+                onClick={() => setTestResults(prev => ({ ...prev, polarity: 'fail' }))}
+                className={`flex-1 py-2 rounded-lg font-medium text-sm transition-colors ${
+                  testResults.polarity === 'fail'
+                    ? 'bg-red-600 text-white'
+                    : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                }`}
+              >
+                ✗ Fail
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
