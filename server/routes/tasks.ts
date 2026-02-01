@@ -134,24 +134,44 @@ function taskBelongsToJob(task: Record<string, unknown>, jobId: string): boolean
   return jobIds.includes(jobId)
 }
 
+// Task status option ID to label mapping (for READING from SmartSuite)
+const TASK_STATUS_OPTIONS: Record<string, string> = {
+  '6lyBx': 'pending',
+  '99zi7': 'in_progress',
+  'Tp5LB': 'completed',
+  'QyMRS': 'skipped',
+}
+
+// Reverse mapping: status string to option ID (for WRITING to SmartSuite)
+const TASK_STATUS_TO_OPTION_ID: Record<string, string> = {
+  'pending': '6lyBx',
+  'in_progress': '99zi7',
+  'completed': 'Tp5LB',
+  'skipped': 'QyMRS',
+}
+
 // Helper: Extract status value from SmartSuite format
 function extractStatus(statusValue: unknown): string {
   if (!statusValue) return 'pending'
   
   if (typeof statusValue === 'object' && statusValue !== null) {
     const obj = statusValue as Record<string, unknown>
+    if (obj.value && typeof obj.value === 'string') {
+      // Check option mapping first
+      if (TASK_STATUS_OPTIONS[obj.value]) {
+        return TASK_STATUS_OPTIONS[obj.value]
+      }
+    }
     if (obj.label && typeof obj.label === 'string') {
       return obj.label.toLowerCase().replace(/\s+/g, '_')
-    }
-    if (obj.value && typeof obj.value === 'string') {
-      if (/^[a-zA-Z0-9]{5,6}$/.test(obj.value)) {
-        return 'pending'
-      }
-      return obj.value.toLowerCase().replace(/\s+/g, '_')
     }
   }
   
   if (typeof statusValue === 'string') {
+    // Check option mapping first
+    if (TASK_STATUS_OPTIONS[statusValue]) {
+      return TASK_STATUS_OPTIONS[statusValue]
+    }
     if (/^[a-zA-Z0-9]{5,6}$/.test(statusValue)) {
       return 'pending'
     }
@@ -650,7 +670,7 @@ tasks.post('/', async (c) => {
       title,
       [TASK_FIELDS.job]: [jobId],
       [TASK_FIELDS.task_type]: taskTypeOptionId,
-      [TASK_FIELDS.status]: 'pending',
+      [TASK_FIELDS.status]: TASK_STATUS_TO_OPTION_ID['pending'],
       [TASK_FIELDS.order]: nextOrder,
       [TASK_FIELDS.notes]: (body.notes as string) || ''
     }
@@ -715,7 +735,7 @@ tasks.post('/bulk', async (c) => {
         title,
         [TASK_FIELDS.job]: [jobId],
         [TASK_FIELDS.task_type]: taskTypeOptionId,
-        [TASK_FIELDS.status]: 'pending',
+        [TASK_FIELDS.status]: TASK_STATUS_TO_OPTION_ID['pending'],
         [TASK_FIELDS.order]: nextOrder,
         [TASK_FIELDS.notes]: ''
       }
@@ -768,7 +788,9 @@ tasks.put('/:id', async (c) => {
     const updateData: Record<string, unknown> = {}
 
     if (body.status !== undefined) {
-      updateData[TASK_FIELDS.status] = body.status
+      // Convert status string to option ID
+      const statusOptionId = TASK_STATUS_TO_OPTION_ID[body.status as string]
+      updateData[TASK_FIELDS.status] = statusOptionId || body.status
     }
     if (body.notes !== undefined) {
       updateData[TASK_FIELDS.notes] = body.notes
