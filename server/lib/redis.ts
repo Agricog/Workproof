@@ -2,7 +2,6 @@
  * Redis Client with Graceful Fallback
  * Uses Upstash Redis REST API - fails silently if unavailable
  */
-
 import { Redis } from '@upstash/redis'
 
 // Singleton instance
@@ -105,6 +104,23 @@ export function cacheDelete(key: string): void {
 }
 
 /**
+ * Clear all cache (flush entire database)
+ */
+export async function clearAllCache(): Promise<boolean> {
+  const client = getRedisClient()
+  if (!client) return false
+
+  try {
+    await client.flushdb()
+    console.log('[REDIS] Cache cleared (flushdb)')
+    return true
+  } catch (error) {
+    console.error('[REDIS] Clear cache error:', error)
+    return false
+  }
+}
+
+/**
  * Health check - test Redis connection
  */
 export async function cacheHealthCheck(): Promise<boolean> {
@@ -124,6 +140,7 @@ export default {
   get: cacheGet,
   set: cacheSet,
   delete: cacheDelete,
+  clear: clearAllCache,
   healthCheck: cacheHealthCheck,
   KEYS: CACHE_KEYS,
   TTL: CACHE_TTL,
