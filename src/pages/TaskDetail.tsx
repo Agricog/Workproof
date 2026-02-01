@@ -42,6 +42,7 @@ export default function TaskDetail() {
   const [showCamera, setShowCamera] = useState(false)
   const [selectedEvidenceType, setSelectedEvidenceType] = useState<EvidenceType | null>(null)
   const [selectedPhotoStage, setSelectedPhotoStage] = useState<PhotoStage | null>(null)
+  const [selectedCustomName, setSelectedCustomName] = useState<string | null>(null)
   const [capturedEvidence, setCapturedEvidence] = useState<Record<string, CapturedEvidenceInfo>>({})
 
   useEffect(() => {
@@ -91,9 +92,10 @@ export default function TaskDetail() {
     }
   }
 
-  const handleCaptureStart = async (evidenceType: EvidenceType, stage: PhotoStage) => {
+  const handleCaptureStart = async (evidenceType: EvidenceType, stage: PhotoStage, customName?: string) => {
     setSelectedEvidenceType(evidenceType)
     setSelectedPhotoStage(stage)
+    setSelectedCustomName(customName || null)
     setShowCamera(true)
 
     // Update task status to in_progress if pending
@@ -117,23 +119,28 @@ export default function TaskDetail() {
 
   const handleCaptureComplete = async (evidence: StoredEvidence) => {
     if (evidence.evidenceType) {
+      // For custom evidence, use a unique key based on timestamp
+      const evidenceKey = selectedCustomName 
+        ? `custom_${Date.now()}`
+        : evidence.evidenceType
+
       setCapturedEvidence((prev) => {
         const updated = {
           ...prev,
-          [evidence.evidenceType]: {
+          [evidenceKey]: {
             captured: true,
             stage: selectedPhotoStage || undefined
           },
         }
 
-        // Check if task is now complete
+        // Check if task is now complete (only count required evidence)
         if (task) {
           const config = getTaskTypeConfig(task.taskType)
           const requiredCount = config.requiredEvidence.length
-          const capturedCount = Object.keys(updated).length
+          const capturedRequiredCount = config.requiredEvidence.filter(e => updated[e]?.captured).length
 
-          if (capturedCount >= requiredCount) {
-            trackTaskCompleted(task.taskType, capturedCount)
+          if (capturedRequiredCount >= requiredCount) {
+            trackTaskCompleted(task.taskType, Object.keys(updated).length)
             // Update task status to complete
             updateTaskStatus('complete')
           }
@@ -146,12 +153,14 @@ export default function TaskDetail() {
     setShowCamera(false)
     setSelectedEvidenceType(null)
     setSelectedPhotoStage(null)
+    setSelectedCustomName(null)
 
     // Delay refresh to allow sync to complete
     setTimeout(() => {
       loadTaskData()
     }, 2000)
   }
+
   const updateTaskStatus = async (status: TaskStatus) => {
     if (!task) return
 
@@ -170,6 +179,7 @@ export default function TaskDetail() {
     setShowCamera(false)
     setSelectedEvidenceType(null)
     setSelectedPhotoStage(null)
+    setSelectedCustomName(null)
   }
 
   if (isLoading) {
@@ -214,6 +224,7 @@ export default function TaskDetail() {
       <PhotoCapture
         evidenceType={selectedEvidenceType}
         photoStage={selectedPhotoStage || undefined}
+        customName={selectedCustomName || undefined}
         taskId={task.id}
         jobId={jobId || task.jobId}
         workerId="current-user"
@@ -258,7 +269,7 @@ export default function TaskDetail() {
               role="progressbar"
               aria-valuenow={
                 config.requiredEvidence.length
-                  ? (Object.keys(capturedEvidence).length / config.requiredEvidence.length) * 100
+                  ? (config.requiredEvidence.filter(e => capturedEvidence[e]?.captured).length / config.requiredEvidence.length) * 100
                   : 0
               }
               aria-valuemin={0}
@@ -270,14 +281,14 @@ export default function TaskDetail() {
                 style={{
                   width: `${
                     config.requiredEvidence.length
-                      ? (Object.keys(capturedEvidence).length / config.requiredEvidence.length) * 100
+                      ? (config.requiredEvidence.filter(e => capturedEvidence[e]?.captured).length / config.requiredEvidence.length) * 100
                       : 0
                   }%`,
                 }}
               ></div>
             </div>
             <span className="text-sm font-medium text-gray-700">
-              {Object.keys(capturedEvidence).length}/{config.requiredEvidence.length}
+              {config.requiredEvidence.filter(e => capturedEvidence[e]?.captured).length}/{config.requiredEvidence.length}
             </span>
           </div>
         </div>
