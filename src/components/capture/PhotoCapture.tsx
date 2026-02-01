@@ -52,7 +52,6 @@ export default function PhotoCapture({
 
   const {
     location,
-    error: geoError,
     isLoading: geoLoading,
     getLocation,
   } = useGeolocation()
