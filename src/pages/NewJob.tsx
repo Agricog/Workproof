@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Helmet } from 'react-helmet-async'
 import { useAuth } from '@clerk/clerk-react'
-import { ArrowLeft, MapPin, User, Calendar, Plus, AlertCircle, Phone, Mail, FileText } from 'lucide-react'
+import { ArrowLeft, MapPin, User, Calendar, Plus, AlertCircle, Phone, Mail, FileText, X } from 'lucide-react'
 import { validateAddress, validateClientName, validateInput } from '../utils/validation'
 import { sanitizeInput } from '../utils/sanitization'
 import { TASK_TYPE_CONFIGS } from '../types/taskConfigs'
@@ -24,6 +24,7 @@ interface FormData {
   startDate: string
   notes: string
   selectedTasks: TaskType[]
+  customTaskName: string
 }
 
 interface FormErrors {
@@ -36,12 +37,15 @@ interface FormErrors {
   notes?: string
   tasks?: string
   submit?: string
+  customTaskName?: string
 }
 
 export default function NewJob() {
   const navigate = useNavigate()
   const { getToken } = useAuth()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [showCustomModal, setShowCustomModal] = useState(false)
+  const [tempCustomName, setTempCustomName] = useState('')
   const [formData, setFormData] = useState<FormData>({
     address: '',
     postcode: '',
@@ -51,6 +55,7 @@ export default function NewJob() {
     startDate: new Date().toISOString().split('T')[0] || '',
     notes: '',
     selectedTasks: [],
+    customTaskName: '',
   })
   const [errors, setErrors] = useState<FormErrors>({})
 
@@ -73,7 +78,6 @@ export default function NewJob() {
     const sanitized = sanitizeInput(value).toUpperCase()
     setFormData((prev) => ({ ...prev, postcode: sanitized }))
     
-    // Only validate if not empty (postcode is optional but must be valid if provided)
     if (sanitized) {
       const validation = validateInput(sanitized, 'postcode', 10)
       if (!validation.isValid) {
@@ -109,7 +113,6 @@ export default function NewJob() {
     const sanitized = sanitizeInput(value)
     setFormData((prev) => ({ ...prev, clientPhone: sanitized }))
     
-    // Only validate if not empty (phone is optional)
     if (sanitized) {
       const validation = validateInput(sanitized, 'phone', 20)
       if (!validation.isValid) {
@@ -130,7 +133,6 @@ export default function NewJob() {
     const sanitized = sanitizeInput(value)
     setFormData((prev) => ({ ...prev, clientEmail: sanitized }))
     
-    // Only validate if not empty (email is optional)
     if (sanitized) {
       const validation = validateInput(sanitized, 'email', 100)
       if (!validation.isValid) {
@@ -151,7 +153,6 @@ export default function NewJob() {
     const sanitized = sanitizeInput(value)
     setFormData((prev) => ({ ...prev, notes: sanitized }))
     
-    // Notes have a max length but no format validation
     if (sanitized.length > 1000) {
       setErrors((prev) => ({ ...prev, notes: 'Notes must be under 1000 characters' }))
     } else {
@@ -160,13 +161,61 @@ export default function NewJob() {
   }
 
   const toggleTask = (taskType: TaskType) => {
+    // Special handling for custom task type
+    if (taskType === 'custom') {
+      if (formData.selectedTasks.includes('custom')) {
+        // Deselecting custom - remove it and clear the name
+        setFormData((prev) => ({
+          ...prev,
+          selectedTasks: prev.selectedTasks.filter((t) => t !== 'custom'),
+          customTaskName: '',
+        }))
+      } else {
+        // Selecting custom - show modal
+        setTempCustomName('')
+        setShowCustomModal(true)
+      }
+    } else {
+      // Normal task toggle
+      setFormData((prev) => ({
+        ...prev,
+        selectedTasks: prev.selectedTasks.includes(taskType)
+          ? prev.selectedTasks.filter((t) => t !== taskType)
+          : [...prev.selectedTasks, taskType],
+      }))
+    }
+    setErrors((prev) => ({ ...prev, tasks: undefined }))
+  }
+
+  const handleCustomModalSubmit = () => {
+    const trimmed = tempCustomName.trim()
+    if (!trimmed) {
+      setErrors((prev) => ({ ...prev, customTaskName: 'Please enter a description' }))
+      return
+    }
+    if (trimmed.length < 3) {
+      setErrors((prev) => ({ ...prev, customTaskName: 'Description must be at least 3 characters' }))
+      return
+    }
+    if (trimmed.length > 100) {
+      setErrors((prev) => ({ ...prev, customTaskName: 'Description must be under 100 characters' }))
+      return
+    }
+
     setFormData((prev) => ({
       ...prev,
-      selectedTasks: prev.selectedTasks.includes(taskType)
-        ? prev.selectedTasks.filter((t) => t !== taskType)
-        : [...prev.selectedTasks, taskType],
+      selectedTasks: [...prev.selectedTasks, 'custom'],
+      customTaskName: sanitizeInput(trimmed),
     }))
-    setErrors((prev) => ({ ...prev, tasks: undefined }))
+    setErrors((prev) => ({ ...prev, customTaskName: undefined }))
+    setShowCustomModal(false)
+    setTempCustomName('')
+  }
+
+  const handleCustomModalCancel = () => {
+    setShowCustomModal(false)
+    setTempCustomName('')
+    setErrors((prev) => ({ ...prev, customTaskName: undefined }))
   }
 
   const validateForm = (): boolean => {
@@ -181,7 +230,6 @@ export default function NewJob() {
       }
     }
 
-    // Postcode validation (optional but must be valid UK format if provided)
     if (formData.postcode) {
       const postcodeValidation = validateInput(formData.postcode, 'postcode', 10)
       if (!postcodeValidation.isValid) {
@@ -202,7 +250,6 @@ export default function NewJob() {
       }
     }
 
-    // Phone validation (optional)
     if (formData.clientPhone) {
       const phoneValidation = validateInput(formData.clientPhone, 'phone', 20)
       if (!phoneValidation.isValid) {
@@ -214,7 +261,6 @@ export default function NewJob() {
       }
     }
 
-    // Email validation (optional)
     if (formData.clientEmail) {
       const emailValidation = validateInput(formData.clientEmail, 'email', 100)
       if (!emailValidation.isValid) {
@@ -234,7 +280,6 @@ export default function NewJob() {
       newErrors.tasks = 'Select at least one task type'
     }
 
-    // Notes length check
     if (formData.notes && formData.notes.length > 1000) {
       newErrors.notes = 'Notes must be under 1000 characters'
     }
@@ -256,7 +301,6 @@ export default function NewJob() {
     try {
       const token = await getToken()
 
-      // Create the job with all fields
       const jobResponse = await jobsApi.create({
         address: formData.address,
         postcode: formData.postcode || undefined,
@@ -280,19 +324,16 @@ export default function NewJob() {
         const tasksResponse = await tasksApi.bulkCreate(
           jobId,
           formData.selectedTasks,
-          token
+          token,
+          formData.customTaskName || undefined
         )
 
         if (tasksResponse.error) {
-          // Job created but tasks failed - still navigate but log error
           captureError(new Error(tasksResponse.error), 'NewJob.createTasks')
         }
       }
 
-      // Track analytics
       trackJobCreated(formData.selectedTasks.length)
-
-      // Navigate to the new job
       navigate(`/jobs/${jobId}`)
     } catch (error) {
       captureError(error, 'NewJob.handleSubmit')
@@ -304,12 +345,82 @@ export default function NewJob() {
 
   const taskTypes = Object.entries(TASK_TYPE_CONFIGS) as Array<[TaskType, (typeof TASK_TYPE_CONFIGS)[TaskType]]>
 
+  // Get display label for custom task
+  const getTaskLabel = (type: TaskType, config: (typeof TASK_TYPE_CONFIGS)[TaskType]) => {
+    if (type === 'custom' && formData.customTaskName) {
+      return formData.customTaskName
+    }
+    return config.label
+  }
+
   return (
     <div>
       <Helmet>
         <title>New Job | WorkProof</title>
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
+
+      {/* Custom Task Modal */}
+      {showCustomModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 animate-fade-in">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Custom Task</h3>
+              <button
+                onClick={handleCustomModalCancel}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            
+            <p className="text-sm text-gray-600 mb-4">
+              What type of work is this?
+            </p>
+            
+            <input
+              type="text"
+              value={tempCustomName}
+              onChange={(e) => {
+                setTempCustomName(e.target.value)
+                setErrors((prev) => ({ ...prev, customTaskName: undefined }))
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  handleCustomModalSubmit()
+                }
+              }}
+              className={`input-field w-full ${errors.customTaskName ? 'border-red-500' : ''}`}
+              placeholder="e.g. EV Charger Installation"
+              maxLength={100}
+              autoFocus
+            />
+            
+            {errors.customTaskName && (
+              <p className="text-red-600 text-sm mt-2">{errors.customTaskName}</p>
+            )}
+            
+            <div className="flex gap-3 mt-6">
+              <button
+                type="button"
+                onClick={handleCustomModalCancel}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCustomModalSubmit}
+                className="flex-1 btn-primary"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="animate-fade-in">
         <div className="flex items-center gap-3 mb-6">
@@ -323,7 +434,6 @@ export default function NewJob() {
           <h1 className="text-xl font-bold text-gray-900">New Job</h1>
         </div>
 
-        {/* Submit Error */}
         {errors.submit && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
@@ -336,7 +446,6 @@ export default function NewJob() {
             <h2 className="font-semibold text-gray-900 mb-4">Site Details</h2>
 
             <div className="space-y-4">
-              {/* Address */}
               <div>
                 <label htmlFor="address" className="block text-sm font-medium text-gray-700 mb-1">
                   Site Address <span className="text-red-500">*</span>
@@ -361,7 +470,6 @@ export default function NewJob() {
                 )}
               </div>
 
-              {/* Postcode */}
               <div>
                 <label htmlFor="postcode" className="block text-sm font-medium text-gray-700 mb-1">
                   Postcode
@@ -390,7 +498,6 @@ export default function NewJob() {
             <h2 className="font-semibold text-gray-900 mb-4">Client Details</h2>
 
             <div className="space-y-4">
-              {/* Client Name */}
               <div>
                 <label htmlFor="clientName" className="block text-sm font-medium text-gray-700 mb-1">
                   Client Name <span className="text-red-500">*</span>
@@ -415,7 +522,6 @@ export default function NewJob() {
                 )}
               </div>
 
-              {/* Client Phone */}
               <div>
                 <label htmlFor="clientPhone" className="block text-sm font-medium text-gray-700 mb-1">
                   Client Phone
@@ -440,7 +546,6 @@ export default function NewJob() {
                 )}
               </div>
 
-              {/* Client Email */}
               <div>
                 <label htmlFor="clientEmail" className="block text-sm font-medium text-gray-700 mb-1">
                   Client Email
@@ -471,7 +576,6 @@ export default function NewJob() {
             <h2 className="font-semibold text-gray-900 mb-4">Job Details</h2>
 
             <div className="space-y-4">
-              {/* Start Date */}
               <div>
                 <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1">
                   Start Date <span className="text-red-500">*</span>
@@ -495,7 +599,6 @@ export default function NewJob() {
                 )}
               </div>
 
-              {/* Notes */}
               <div>
                 <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-1">
                   Notes
@@ -573,7 +676,7 @@ export default function NewJob() {
                         </svg>
                       )}
                     </div>
-                    <span className="font-medium text-gray-900">{config.label}</span>
+                    <span className="font-medium text-gray-900">{getTaskLabel(type, config)}</span>
                   </div>
                   {config.partPNotifiable && (
                     <span className="badge badge-warning text-xs">Part P</span>
