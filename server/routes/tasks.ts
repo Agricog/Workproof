@@ -678,6 +678,7 @@ tasks.post('/bulk', async (c) => {
     const body = await c.req.json() as Record<string, unknown>
     const jobId = (body.job_id || body.job) as string
     const taskTypes = (body.task_types || body.taskTypes) as string[]
+    const customTaskName = (body.custom_task_name || body.customTaskName) as string | undefined
 
     if (!jobId || !taskTypes || !Array.isArray(taskTypes) || taskTypes.length === 0) {
       return c.json({ error: 'Missing required fields: job_id, task_types array' }, 400)
@@ -698,12 +699,17 @@ tasks.post('/bulk', async (c) => {
     const createdTasks: Record<string, unknown>[] = []
 
     for (const taskType of taskTypes) {
-      // Generate unique title with job ID suffix and timestamp
-      const title = `${taskType.replace(/_/g, ' ')} - ${jobId.slice(-6)}-${Date.now()}`
+      // Use custom name for 'custom' type, otherwise generate standard title
+      let title: string
+      if (taskType === 'custom' && customTaskName) {
+        title = customTaskName
+      } else {
+        title = `${taskType.replace(/_/g, ' ')} - ${jobId.slice(-6)}-${Date.now()}`
+      }
 
       // Convert task type string to SmartSuite option ID
       const taskTypeOptionId = getTaskTypeOptionId(taskType)
-      console.log('[TASKS] Bulk creating task with type:', taskType, '-> option ID:', taskTypeOptionId)
+      console.log('[TASKS] Bulk creating task with type:', taskType, '-> option ID:', taskTypeOptionId, 'title:', title)
 
       const createData: Record<string, unknown> = {
         title,
