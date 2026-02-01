@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = 'workproof'
-const DB_VERSION = 2 // Bumped for new fields
+const DB_VERSION = 3 // Bumped for audio fields
 const STORAGE_WARNING_THRESHOLD = 0.8 // 80% of quota
 
 export interface StoredEvidence {
@@ -31,6 +31,9 @@ export interface StoredEvidence {
   testRcdTripTime: number | null
   testContinuity: number | null
   testPolarity: 'pass' | 'fail' | null
+  // Voice note fields
+  audioData: string | null
+  audioTranscript: string | null
 }
 
 export interface SyncQueueItem {
