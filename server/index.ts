@@ -13,6 +13,7 @@ import auditPacks from './routes/audit-packs.js'
 import imageProxy from './routes/imageProxy.js'
 import verify from './routes/verify.js'
 import admin from './routes/admin.js'
+import transcribe from './routes/transcribe.js'
 
 // Webhooks
 import clerkWebhook from './webhooks/clerk.js'
@@ -43,6 +44,7 @@ app.route('/api/audit-packs', auditPacks)
 app.route('/api/images', imageProxy)
 app.route('/api/verify', verify)
 app.route('/api/admin', admin)
+app.route('/api/transcribe', transcribe)
 
 // Webhooks
 app.route('/webhooks', clerkWebhook)
