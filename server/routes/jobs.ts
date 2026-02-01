@@ -334,6 +334,15 @@ jobs.get('/:id/pack-data', async (c) => {
         ? (capturedAtRaw as { date: string }).date
         : capturedAtRaw
 
+      // Ensure numeric types for coordinates
+      const latRaw = e[EVIDENCE_FIELDS.latitude]
+      const lngRaw = e[EVIDENCE_FIELDS.longitude]
+      const accRaw = e[EVIDENCE_FIELDS.gps_accuracy]
+      
+      const latitude = latRaw ? parseFloat(String(latRaw)) : null
+      const longitude = lngRaw ? parseFloat(String(lngRaw)) : null
+      const gpsAccuracy = accRaw ? parseFloat(String(accRaw)) : null
+
       return {
         id: e.id,
         taskId: taskId,
@@ -341,9 +350,9 @@ jobs.get('/:id/pack-data', async (c) => {
         photoStage: e[EVIDENCE_FIELDS.photo_stage] || null,
         photoUrl: e[EVIDENCE_FIELDS.photo_url] || null,
         photoHash: e[EVIDENCE_FIELDS.photo_hash] || null,
-        latitude: e[EVIDENCE_FIELDS.latitude] || null,
-        longitude: e[EVIDENCE_FIELDS.longitude] || null,
-        gpsAccuracy: e[EVIDENCE_FIELDS.gps_accuracy] || null,
+        latitude: latitude,
+        longitude: longitude,
+        gpsAccuracy: gpsAccuracy,
         capturedAt: capturedAt,
         notes: e[EVIDENCE_FIELDS.notes] || null
       }
