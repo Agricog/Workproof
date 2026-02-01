@@ -1,6 +1,6 @@
 {
   "name": "workproof",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "type": "module",
   "scripts": {
@@ -26,7 +26,6 @@
     "hono": "^4.0.0",
     "lucide-react": "^0.445.0",
     "pdf-lib": "^1.17.1",
-    "qrcode": "^1.5.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-helmet-async": "^2.0.4",
@@ -36,7 +35,6 @@
   "devDependencies": {
     "@types/dompurify": "^3.0.5",
     "@types/node": "^20.11.0",
-    "@types/qrcode": "^1.5.5",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@typescript-eslint/eslint-plugin": "^7.13.1",
