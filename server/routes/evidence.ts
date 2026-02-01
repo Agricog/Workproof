@@ -421,7 +421,13 @@ function transformEvidence(item: Record<string, unknown>): Record<string, unknow
     gpsAccuracy: item[EVIDENCE_FIELDS.gps_accuracy] || null,
     capturedAt: capturedAt || null,
     syncedAt: syncedAt || null,
-    isSynced: isSynced
+    isSynced: isSynced,
+    // Test results
+    testVoltage: item[EVIDENCE_FIELDS.test_voltage] || null,
+    testResistance: item[EVIDENCE_FIELDS.test_resistance] || null,
+    testRcdTripTime: item[EVIDENCE_FIELDS.test_rcd_trip_time] || null,
+    testContinuity: item[EVIDENCE_FIELDS.test_continuity] || null,
+    testPolarity: item[EVIDENCE_FIELDS.test_polarity] || null,
   }
 }
 
@@ -743,6 +749,34 @@ evidence.post('/', async (c) => {
     }
     if (body.gps_accuracy !== undefined || body.gpsAccuracy !== undefined) {
       evidenceData[EVIDENCE_FIELDS.gps_accuracy] = body.gps_accuracy || body.gpsAccuracy
+    }
+
+    // Add test result fields if provided
+    const testVoltage = body.test_voltage ?? body.testVoltage
+    const testResistance = body.test_resistance ?? body.testResistance
+    const testRcdTripTime = body.test_rcd_trip_time ?? body.testRcdTripTime
+    const testContinuity = body.test_continuity ?? body.testContinuity
+    const testPolarity = body.test_polarity ?? body.testPolarity
+
+    if (testVoltage !== undefined && testVoltage !== null) {
+      evidenceData[EVIDENCE_FIELDS.test_voltage] = testVoltage
+      console.log('[EVIDENCE] Adding test voltage:', testVoltage)
+    }
+    if (testResistance !== undefined && testResistance !== null) {
+      evidenceData[EVIDENCE_FIELDS.test_resistance] = testResistance
+      console.log('[EVIDENCE] Adding test resistance:', testResistance)
+    }
+    if (testRcdTripTime !== undefined && testRcdTripTime !== null) {
+      evidenceData[EVIDENCE_FIELDS.test_rcd_trip_time] = testRcdTripTime
+      console.log('[EVIDENCE] Adding test RCD trip time:', testRcdTripTime)
+    }
+    if (testContinuity !== undefined && testContinuity !== null) {
+      evidenceData[EVIDENCE_FIELDS.test_continuity] = testContinuity
+      console.log('[EVIDENCE] Adding test continuity:', testContinuity)
+    }
+    if (testPolarity !== undefined && testPolarity !== null) {
+      evidenceData[EVIDENCE_FIELDS.test_polarity] = testPolarity
+      console.log('[EVIDENCE] Adding test polarity:', testPolarity)
     }
 
     console.log('[EVIDENCE] Creating record with data:', JSON.stringify(evidenceData, null, 2))
