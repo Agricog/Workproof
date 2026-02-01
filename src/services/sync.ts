@@ -141,6 +141,12 @@ async function syncEvidence(token: string): Promise<void> {
           latitude: item.latitude,
           longitude: item.longitude,
           accuracy: item.accuracy,
+          // Test results
+          testVoltage: item.testVoltage,
+          testResistance: item.testResistance,
+          testRcdTripTime: item.testRcdTripTime,
+          testContinuity: item.testContinuity,
+          testPolarity: item.testPolarity,
         },
         token
       )
@@ -232,6 +238,11 @@ async function processEvidenceSync(item: SyncQueueItem, token: string): Promise<
     latitude: number | null
     longitude: number | null
     accuracy: number | null
+    testVoltage?: number | null
+    testResistance?: number | null
+    testRcdTripTime?: number | null
+    testContinuity?: number | null
+    testPolarity?: 'pass' | 'fail' | null
   }
 
   const response = await evidenceApi.upload(
@@ -247,6 +258,11 @@ async function processEvidenceSync(item: SyncQueueItem, token: string): Promise<
       latitude: data.latitude,
       longitude: data.longitude,
       accuracy: data.accuracy,
+      testVoltage: data.testVoltage,
+      testResistance: data.testResistance,
+      testRcdTripTime: data.testRcdTripTime,
+      testContinuity: data.testContinuity,
+      testPolarity: data.testPolarity,
     },
     token
   )
@@ -333,6 +349,12 @@ export async function forceSyncNow(
             latitude: item.latitude,
             longitude: item.longitude,
             accuracy: item.accuracy,
+            // Test results
+            testVoltage: item.testVoltage,
+            testResistance: item.testResistance,
+            testRcdTripTime: item.testRcdTripTime,
+            testContinuity: item.testContinuity,
+            testPolarity: item.testPolarity,
           },
           token
         )
