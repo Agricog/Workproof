@@ -20,6 +20,7 @@ interface PhotoCaptureProps {
   jobId: string
   evidenceType: EvidenceType
   photoStage?: PhotoStage
+  customName?: string
   workerId: string
   onCapture: (evidence: StoredEvidence) => void
   onCancel: () => void
@@ -31,6 +32,7 @@ export default function PhotoCapture({
   jobId,
   evidenceType,
   photoStage,
+  customName,
   workerId,
   onCapture,
   onCancel,
@@ -122,13 +124,22 @@ export default function PhotoCapture({
       const photoData = await blobToBase64(capturedBlob)
       const thumbnailData = thumbnail || ''
 
+      // For custom evidence, prepend the custom name to notes
+      let finalNotes = notes.trim() || null
+      if (customName) {
+        finalNotes = customName + (finalNotes ? `: ${finalNotes}` : '')
+      }
+
+      // For custom evidence, use 'additional_evidence' as the type
+      const finalEvidenceType = customName ? 'additional_evidence' : evidenceType
+
       const evidence: StoredEvidence = {
         id: generateId(),
         taskId,
         jobId,
-        evidenceType,
+        evidenceType: finalEvidenceType as EvidenceType,
         photoStage: photoStage || null,
-        notes: notes.trim() || null,
+        notes: finalNotes,
         photoData,
         thumbnailData,
         hash,
@@ -146,7 +157,7 @@ export default function PhotoCapture({
       await saveEvidence(evidence)
 
       // Track analytics
-      trackEvidenceCaptured(evidenceType, location !== null)
+      trackEvidenceCaptured(finalEvidenceType, location !== null)
 
       // Trigger sync if online
       if (navigator.onLine) {
@@ -160,7 +171,10 @@ export default function PhotoCapture({
     } finally {
       setIsSaving(false)
     }
-  }, [capturedBlob, thumbnail, notes, taskId, jobId, evidenceType, photoStage, workerId, location, onCapture])
+  }, [capturedBlob, thumbnail, notes, taskId, jobId, evidenceType, photoStage, customName, workerId, location, onCapture])
+
+  // Display label - use customName if provided
+  const displayLabel = customName || label
 
   // Error state
   if (cameraError) {
@@ -196,12 +210,18 @@ export default function PhotoCapture({
         </button>
         <div className="text-center">
           <span className="text-white font-medium text-sm truncate max-w-[200px] block">
-            {label}
+            {displayLabel}
           </span>
           {/* Photo Stage Badge */}
           {photoStage && (
             <span className={`text-xs px-2 py-0.5 rounded-full mt-1 inline-block ${PHOTO_STAGE_COLORS[photoStage]}`}>
               {PHOTO_STAGE_LABELS[photoStage]} Photo
+            </span>
+          )}
+          {/* Custom Evidence Badge */}
+          {customName && (
+            <span className="text-xs px-2 py-0.5 rounded-full mt-1 inline-block bg-purple-100 text-purple-700 ml-1">
+              Custom
             </span>
           )}
         </div>
@@ -294,7 +314,7 @@ export default function PhotoCapture({
         <div className="bg-red-500 text-white px-4 py-2 text-sm text-center">
           {saveError}
         </div>
-      )}
+      )}https://github.com/Agricog/Workproof/blob/main/src/components/capture/PhotoCapture.tsx
 
       {/* Controls */}
       <div className="bg-gray-900 px-4 py-6 safe-area-bottom">
