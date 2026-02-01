@@ -269,12 +269,12 @@ export default function PhotoCapture({
       </div>
 
       {/* GPS Status */}
-      <div className="bg-gray-900/80 backdrop-blur-sm px-4 py-2">
+      <div className={`px-4 py-2 ${!location && !geoLoading ? 'bg-amber-900/90' : 'bg-gray-900/80'} backdrop-blur-sm`}>
         <div className="flex items-center justify-center gap-4 text-sm">
           <div className="flex items-center gap-1">
-            <MapPin className={`w-4 h-4 ${location ? 'text-green-400' : 'text-gray-400'}`} />
-            <span className={location ? 'text-green-400' : 'text-gray-400'}>
-              {geoLoading ? 'Getting location...' : location ? 'GPS locked' : (typeof geoError === 'string' ? geoError : 'No GPS')}
+            <MapPin className={`w-4 h-4 ${location ? 'text-green-400' : geoLoading ? 'text-gray-400' : 'text-amber-400'}`} />
+            <span className={location ? 'text-green-400' : geoLoading ? 'text-gray-400' : 'text-amber-300'}>
+              {geoLoading ? 'Getting location...' : location ? `GPS locked (±${Math.round(location.accuracy || 0)}m)` : 'GPS unavailable'}
             </span>
           </div>
           <div className="flex items-center gap-1 text-gray-400">
@@ -282,6 +282,11 @@ export default function PhotoCapture({
             <span>{new Date().toLocaleTimeString()}</span>
           </div>
         </div>
+        {!location && !geoLoading && (
+          <p className="text-amber-200 text-xs text-center mt-1">
+            Photo will still be saved with timestamp
+          </p>
+        )}
       </div>
 
       {/* Notes Input - shown after photo capture */}
@@ -314,7 +319,7 @@ export default function PhotoCapture({
         <div className="bg-red-500 text-white px-4 py-2 text-sm text-center">
           {saveError}
         </div>
-      )}https://github.com/Agricog/Workproof/blob/main/src/components/capture/PhotoCapture.tsx
+      )}
 
       {/* Controls */}
       <div className="bg-gray-900 px-4 py-6 safe-area-bottom">
