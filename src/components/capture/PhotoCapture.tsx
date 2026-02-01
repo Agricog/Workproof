@@ -221,11 +221,13 @@ export default function PhotoCapture({
     try {
       // Convert blob to base64
       const reader = new FileReader()
-      const base64Promise = new Promise<string>((resolve) => {
+      const base64Promise = new Promise<string>((resolve, reject) => {
         reader.onloadend = () => {
           const base64 = reader.result as string
-          resolve(base64.split(',')[1]) // Remove data URL prefix
+          const parts = base64.split(',')
+          resolve(parts[1] || parts[0]) // Remove data URL prefix, fallback to full string
         }
+        reader.onerror = () => reject(new Error('Failed to read audio'))
       })
       reader.readAsDataURL(blob)
       const audioBase64 = await base64Promise
