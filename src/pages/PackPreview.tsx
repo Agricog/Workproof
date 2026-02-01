@@ -161,12 +161,13 @@ export default function PackPreview() {
   }
 
   const handleSignatureSave = async (signatureBlob: Blob) => {
-    if (!jobId) return
+    if (!jobId || !lastGeneratedPackId) return
     try {
       const token = await getToken()
       const API_BASE = import.meta.env.VITE_API_URL || ''
       const filename = `signature-${Date.now()}.png`
       
+      // 1. Get signed upload URL
       const urlRes = await fetch(`${API_BASE}/api/evidence/upload-url`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -176,8 +177,18 @@ export default function PackPreview() {
       if (!urlRes.ok) throw new Error('Failed to get upload URL')
       const { upload_url, photo_url } = await urlRes.json()
       
+      // 2. Upload to R2
       const uploadRes = await fetch(upload_url, { method: 'PUT', headers: { 'Content-Type': 'image/png' }, body: signatureBlob })
       if (!uploadRes.ok) throw new Error('Failed to upload signature')
+      
+      // 3. Save signature URL to audit pack record
+      const saveRes = await fetch(`${API_BASE}/api/audit-packs/${lastGeneratedPackId}/signature`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ signature_url: photo_url })
+      })
+      if (!saveRes.ok) throw new Error('Failed to save signature to audit pack')
       
       setSignatureUrl(photo_url)
       setShowSignatureModal(false)
