@@ -20,7 +20,6 @@ import {
   QrCode
 } from 'lucide-react'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
-import QRCode from 'qrcode'
 import { trackPageView, trackError } from '../utils/analytics'
 import { jobsApi, tasksApi, evidenceApi, auditPackApi } from '../services/api'
 import { captureError } from '../utils/errorTracking'
@@ -177,20 +176,24 @@ export default function PackPreview() {
     }
   }
 
-  // Generate QR code as PNG data URL
-  const generateQRCode = async (url: string): Promise<string> => {
+  // Generate QR code via API (no npm package needed)
+  const generateQRCodeUrl = (url: string): string => {
+    // Use QR Server API - free, no auth required
+    const encodedUrl = encodeURIComponent(url)
+    return `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodedUrl}&margin=5`
+  }
+
+  // Fetch QR code image bytes
+  const fetchQRCodeBytes = async (url: string): Promise<Uint8Array | null> => {
     try {
-      return await QRCode.toDataURL(url, {
-        width: 120,
-        margin: 1,
-        color: {
-          dark: '#1a1a1a',
-          light: '#ffffff'
-        }
-      })
+      const qrUrl = generateQRCodeUrl(url)
+      const response = await fetch(qrUrl)
+      if (!response.ok) return null
+      const arrayBuffer = await response.arrayBuffer()
+      return new Uint8Array(arrayBuffer)
     } catch (err) {
-      console.error('Failed to generate QR code:', err)
-      return ''
+      console.error('Failed to fetch QR code:', err)
+      return null
     }
   }
 
@@ -217,7 +220,7 @@ export default function PackPreview() {
       // Generate verification URL and QR code
       const verifyUrl = `https://workproof.co.uk/verify/${auditPackId}`
       setGeneratingStatus('Generating verification QR code...')
-      const qrCodeDataUrl = await generateQRCode(verifyUrl)
+      const qrCodeBytes = await fetchQRCodeBytes(verifyUrl)
       
       setGeneratingStatus('Creating document...')
       
@@ -256,10 +259,9 @@ export default function PackPreview() {
       })
       
       // QR Code in top right corner
-      if (qrCodeDataUrl) {
+      if (qrCodeBytes) {
         try {
-          const qrImageBytes = await fetch(qrCodeDataUrl).then(res => res.arrayBuffer())
-          const qrImage = await pdfDoc.embedPng(new Uint8Array(qrImageBytes))
+          const qrImage = await pdfDoc.embedPng(qrCodeBytes)
           
           page.drawImage(qrImage, {
             x: width - 140,
