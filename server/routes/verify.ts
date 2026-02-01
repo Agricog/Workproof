@@ -202,11 +202,17 @@ verify.get('/:packId', async (c) => {
       generatedAt = (generatedAt as Record<string, unknown>).date as string
     }
 
+    // Get job title - SmartSuite stores title directly, not via field ID
+    const jobRecord = job as unknown as Record<string, unknown>
+    const jobTitle = (jobRecord.title as string) || 
+                     (job[JOB_FIELDS.client_name as keyof Job] as string) || 
+                     'Untitled Job'
+
     // Build response
     const response = {
       verified: hashValid && gpsVerified,
       packId: pack.id,
-      jobTitle: job[JOB_FIELDS.title as keyof Job] || 'Untitled Job',
+      jobTitle: jobTitle,
       clientName: job[JOB_FIELDS.client_name as keyof Job] || 'Unknown Client',
       address: job[JOB_FIELDS.address as keyof Job] || '',
       postcode: job[JOB_FIELDS.postcode as keyof Job] || '',
