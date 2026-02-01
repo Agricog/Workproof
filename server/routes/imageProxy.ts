@@ -23,10 +23,11 @@ imageProxy.get('/proxy', async (c) => {
       return c.json({ error: 'Missing url parameter' }, 400 as const)
     }
 
-    // Validate URL is from our R2 bucket only (security check)
+    // Validate URL is from allowed domains only (security)
     const allowedDomains = [
       'evidence.workproof.co.uk',
       'r2.cloudflarestorage.com',
+      'api.qrserver.com',  // QR code generator for PDF verification
     ]
     
     let url: URL
@@ -45,7 +46,7 @@ imageProxy.get('/proxy', async (c) => {
       return c.json({ error: 'Unauthorized domain' }, 403 as const)
     }
 
-    // Fetch the image from R2
+    // Fetch the image
     const response = await fetch(imageUrl)
     
     if (!response.ok) {
