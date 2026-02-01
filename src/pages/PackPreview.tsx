@@ -11,9 +11,7 @@ import {
   ArrowLeft,
   Download,
   MapPin,
-  CheckCircle,
   Shield,
-  Clock,
   Camera,
   X,
   Loader2,
@@ -35,9 +33,9 @@ interface EvidenceItem {
   photoStage?: string
   photoUrl: string | null
   photoHash?: string
-  latitude?: string
-  longitude?: string
-  gpsAccuracy?: string
+  latitude?: string | number
+  longitude?: string | number
+  gpsAccuracy?: string | number
   capturedAt?: string | { date: string }
   syncedAt?: string | { date: string }
   isSynced?: boolean
@@ -61,6 +59,7 @@ export default function PackPreview() {
   useEffect(() => {
     trackPageView('/packs/preview', 'Pack Preview')
     loadPackData()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId])
 
   const loadPackData = async () => {
@@ -95,7 +94,25 @@ export default function PackPreview() {
             const evidenceItems = Array.isArray(evidenceResponse.data)
               ? evidenceResponse.data
               : (evidenceResponse.data as { items?: EvidenceItem[] }).items || []
-            allEvidence.push(...evidenceItems)
+            // Map to our interface
+            evidenceItems.forEach((item: unknown) => {
+              const evidenceItem = item as EvidenceItem
+              allEvidence.push({
+                id: evidenceItem.id,
+                taskId: evidenceItem.taskId,
+                evidenceType: evidenceItem.evidenceType,
+                photoStage: evidenceItem.photoStage,
+                photoUrl: evidenceItem.photoUrl,
+                photoHash: evidenceItem.photoHash,
+                latitude: evidenceItem.latitude,
+                longitude: evidenceItem.longitude,
+                gpsAccuracy: evidenceItem.gpsAccuracy,
+                capturedAt: evidenceItem.capturedAt,
+                syncedAt: evidenceItem.syncedAt,
+                isSynced: evidenceItem.isSynced,
+                notes: evidenceItem.notes
+              })
+            })
           }
         }
         setEvidence(allEvidence)
@@ -131,6 +148,12 @@ export default function PackPreview() {
       month: 'short',
       year: 'numeric'
     })
+  }
+
+  // Convert latitude/longitude to string safely
+  const toCoordString = (coord: string | number | undefined): string | undefined => {
+    if (coord === undefined || coord === null) return undefined
+    return String(coord)
   }
 
   // Fetch image via server proxy to avoid CORS
@@ -180,8 +203,6 @@ export default function PackPreview() {
     setIsGenerating(true)
     setGeneratingStatus('Creating audit pack record...')
     
-    let auditPackId: string | null = null
-    
     try {
       const token = await getToken()
       
@@ -191,7 +212,7 @@ export default function PackPreview() {
         throw new Error(auditPackResponse.error || 'Failed to create audit pack record')
       }
       
-      auditPackId = auditPackResponse.data.id
+      const auditPackId = auditPackResponse.data.id
       const packHash = auditPackResponse.data.hash
       
       // Generate verification URL and fetch QR code
@@ -210,12 +231,14 @@ export default function PackPreview() {
       const width = 595
       const height = 842
       
-      // Client info
+      // Client info - safely access job properties
       const clientName = job.clientName || 'Unknown Client'
       const address = job.address || ''
       const postcode = job.postcode || ''
-      const jobType = job.jobType || 'Electrical Work'
-      const jobTypeDescription = job.jobTypeDescription || ''
+      // Access jobType and jobTypeDescription safely via type assertion
+      const jobData = job as Job & { jobType?: string; jobTypeDescription?: string }
+      const jobType = jobData.jobType || 'Electrical Work'
+      const jobTypeDescription = jobData.jobTypeDescription || ''
       
       // Page 1: Cover Page
       let page = pdfDoc.addPage([width, height])
@@ -462,7 +485,10 @@ export default function PackPreview() {
       yPos -= 30
       
       // Evidence rows
-      evidence.forEach((item, index) => {
+      for (let index = 0; index < evidence.length; index++) {
+        const item = evidence[index]
+        if (!item) continue
+        
         if (yPos < 100) {
           page = pdfDoc.addPage([595, 842])
           yPos = height - 60
@@ -481,8 +507,8 @@ export default function PackPreview() {
         const evidenceType = (item.evidenceType || 'unknown').replace(/_/g, ' ')
         const stage = item.photoStage ? item.photoStage.charAt(0).toUpperCase() + item.photoStage.slice(1) : '-'
         const capturedAt = formatShortDate(item.capturedAt)
-        const lat = item.latitude
-        const lng = item.longitude
+        const lat = toCoordString(item.latitude)
+        const lng = toCoordString(item.longitude)
         const gps = lat && lng ? `${parseFloat(lat).toFixed(4)}, ${parseFloat(lng).toFixed(4)}` : 'N/A'
         const hash = item.photoHash ? item.photoHash.substring(0, 12) + '...' : 'N/A'
         
@@ -494,14 +520,14 @@ export default function PackPreview() {
         page.drawText(hash, { x: 440, y: yPos - 10, size: 7, font: font, color: rgb(0.5, 0.5, 0.5) })
         
         yPos -= 22
-      })
+      }
       
       // Photo Pages - One photo per page
       setGeneratingStatus('Embedding photos...')
       
       for (let i = 0; i < evidence.length; i++) {
         const item = evidence[i]
-        if (!item.photoUrl) continue
+        if (!item || !item.photoUrl) continue
         
         setGeneratingStatus(`Embedding photo ${i + 1} of ${evidence.length}...`)
         
@@ -606,7 +632,9 @@ export default function PackPreview() {
           })
           
           // GPS
-          if (item.latitude && item.longitude) {
+          const itemLat = toCoordString(item.latitude)
+          const itemLng = toCoordString(item.longitude)
+          if (itemLat && itemLng) {
             page.drawText('GPS:', {
               x: 50,
               y: metaY - 18,
@@ -614,7 +642,7 @@ export default function PackPreview() {
               font: font,
               color: rgb(0.5, 0.5, 0.5)
             })
-            page.drawText(`${parseFloat(item.latitude).toFixed(6)}, ${parseFloat(item.longitude).toFixed(6)}`, {
+            page.drawText(`${parseFloat(itemLat).toFixed(6)}, ${parseFloat(itemLng).toFixed(6)}`, {
               x: 110,
               y: metaY - 18,
               size: 9,
@@ -959,7 +987,7 @@ export default function PackPreview() {
                 {selectedImage.latitude && selectedImage.longitude && (
                   <div>
                     <p className="text-gray-500">GPS</p>
-                    <p>{parseFloat(selectedImage.latitude).toFixed(6)}, {parseFloat(selectedImage.longitude).toFixed(6)}</p>
+                    <p>{parseFloat(String(selectedImage.latitude)).toFixed(6)}, {parseFloat(String(selectedImage.longitude)).toFixed(6)}</p>
                   </div>
                 )}
                 {selectedImage.gpsAccuracy && (
