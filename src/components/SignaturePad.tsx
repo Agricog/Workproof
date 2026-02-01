@@ -60,6 +60,7 @@ export default function SignaturePad({ onSave, onCancel, clientName }: Signature
     
     if ('touches' in e) {
       const touch = e.touches[0]
+      if (!touch) return null
       return {
         x: touch.clientX - rect.left,
         y: touch.clientY - rect.top
