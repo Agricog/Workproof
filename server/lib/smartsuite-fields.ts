@@ -53,7 +53,10 @@ export const EVIDENCE_FIELDS = {
   test_resistance: 's0f5909749',
   test_rcd_trip_time: 's0ffef72d8',
   test_continuity: 's647b8c118',
-  test_polarity: 'sbdf7315a9'
+  test_polarity: 'sbdf7315a9',
+  // Voice note fields
+  audio_url: 's85d8ae424',
+  audio_transcript: 's11c4b2e0d'
 } as const
 export const AUDIT_PACK_FIELDS = {
   job: 'sc9f8fa1a7',
