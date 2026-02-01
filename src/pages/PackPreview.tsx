@@ -1,6 +1,7 @@
 /**
  * WorkProof Pack Preview
  * View evidence before export with client-side PDF generation including photos and QR verification
+ * Uses free QR API (no npm package needed) for verification codes
  */
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -93,36 +94,16 @@ export default function PackPreview() {
           if (evidenceResponse.data) {
             const evidenceItems = Array.isArray(evidenceResponse.data)
               ? evidenceResponse.data
-              : (evidenceResponse.data as { items?: unknown[] }).items || []
-            
-            // Map to our interface
-            evidenceItems.forEach((e: unknown) => {
-              const item = e as Record<string, unknown>
-              allEvidence.push({
-                id: item.id as string,
-                taskId: task.id,
-                evidenceType: (item.evidenceType as string) || 'unknown',
-                photoStage: item.photoStage as string | undefined,
-                photoUrl: item.photoUrl as string | null,
-                photoHash: item.photoHash as string | undefined,
-                latitude: item.latitude as string | undefined,
-                longitude: item.longitude as string | undefined,
-                gpsAccuracy: item.gpsAccuracy as string | undefined,
-                capturedAt: item.capturedAt as string | { date: string } | undefined,
-                syncedAt: item.syncedAt as string | { date: string } | undefined,
-                isSynced: item.isSynced as boolean | undefined,
-                notes: item.notes as string | undefined
-              })
-            })
+              : (evidenceResponse.data as { items?: EvidenceItem[] }).items || []
+            allEvidence.push(...evidenceItems)
           }
         }
         setEvidence(allEvidence)
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load pack data'
-      setError(message)
       captureError(err, 'PackPreview.loadPackData')
-      trackError('pack_load_error', message)
+      trackError('pack_load_error', err instanceof Error ? err.message : 'Unknown error')
+      setError('Failed to load pack data. Please try again.')
     } finally {
       setIsLoading(false)
     }
@@ -176,19 +157,15 @@ export default function PackPreview() {
     }
   }
 
-  // Generate QR code via API (no npm package needed)
-  const generateQRCodeUrl = (url: string): string => {
-    // Use QR Server API - free, no auth required
-    const encodedUrl = encodeURIComponent(url)
-    return `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodedUrl}&margin=5`
-  }
-
-  // Fetch QR code image bytes
+  // Fetch QR code from free API - no npm package needed
   const fetchQRCodeBytes = async (url: string): Promise<Uint8Array | null> => {
     try {
-      const qrUrl = generateQRCodeUrl(url)
-      const response = await fetch(qrUrl)
+      // Use free QR API (no auth required, CORS-friendly)
+      const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&format=png&data=${encodeURIComponent(url)}`
+      
+      const response = await fetch(qrApiUrl)
       if (!response.ok) return null
+      
       const arrayBuffer = await response.arrayBuffer()
       return new Uint8Array(arrayBuffer)
     } catch (err) {
@@ -217,7 +194,7 @@ export default function PackPreview() {
       auditPackId = auditPackResponse.data.id
       const packHash = auditPackResponse.data.hash
       
-      // Generate verification URL and QR code
+      // Generate verification URL and fetch QR code
       const verifyUrl = `https://workproof.co.uk/verify/${auditPackId}`
       setGeneratingStatus('Generating verification QR code...')
       const qrCodeBytes = await fetchQRCodeBytes(verifyUrl)
@@ -229,276 +206,202 @@ export default function PackPreview() {
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
       const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
       
-      // Page 1: Cover page
-      let page = pdfDoc.addPage([595, 842]) // A4
-      const { width, height } = page.getSize()
+      // Page dimensions (A4)
+      const width = 595
+      const height = 842
       
-      // Header
-      page.drawText('WORKPROOF', {
+      // Client info
+      const clientName = job.clientName || 'Unknown Client'
+      const address = job.address || ''
+      const postcode = job.postcode || ''
+      const jobType = job.jobType || 'Electrical Work'
+      const jobTypeDescription = job.jobTypeDescription || ''
+      
+      // Page 1: Cover Page
+      let page = pdfDoc.addPage([width, height])
+      
+      // Header bar
+      page.drawRectangle({
+        x: 0,
+        y: height - 80,
+        width: width,
+        height: 80,
+        color: rgb(0.133, 0.545, 0.133)
+      })
+      
+      // Logo/Brand
+      page.drawText('WorkProof', {
         x: 50,
-        y: height - 60,
+        y: height - 50,
         size: 28,
         font: fontBold,
-        color: rgb(0.133, 0.545, 0.133)
+        color: rgb(1, 1, 1)
       })
       
-      page.drawText('Electrical Compliance Audit Pack', {
+      page.drawText('AUDIT PACK', {
         x: 50,
-        y: height - 90,
-        size: 14,
+        y: height - 70,
+        size: 12,
         font: font,
-        color: rgb(0.4, 0.4, 0.4)
+        color: rgb(0.9, 0.9, 0.9)
       })
       
-      // Horizontal line
-      page.drawLine({
-        start: { x: 50, y: height - 110 },
-        end: { x: width - 50, y: height - 110 },
-        thickness: 2,
-        color: rgb(0.133, 0.545, 0.133)
-      })
-      
-      // QR Code in top right corner
+      // QR Code for verification (top right of cover)
       if (qrCodeBytes) {
         try {
           const qrImage = await pdfDoc.embedPng(qrCodeBytes)
-          
           page.drawImage(qrImage, {
             x: width - 140,
-            y: height - 170,
-            width: 90,
-            height: 90
+            y: height - 75,
+            width: 60,
+            height: 60
           })
-          
           page.drawText('Scan to Verify', {
-            x: width - 135,
-            y: height - 185,
-            size: 8,
+            x: width - 145,
+            y: height - 78,
+            size: 7,
             font: font,
-            color: rgb(0.5, 0.5, 0.5)
+            color: rgb(1, 1, 1)
           })
         } catch (err) {
           console.error('Failed to embed QR code:', err)
         }
       }
       
-      // Job details box
-      const boxY = height - 150
-      page.drawRectangle({
-        x: 40,
-        y: boxY - 130,
-        width: width - 180,
-        height: 130,
-        borderColor: rgb(0.85, 0.85, 0.85),
-        borderWidth: 1,
-        color: rgb(0.98, 0.98, 0.98)
-      })
+      // Client details section
+      let yPos = height - 130
       
-      // Client name
-      const clientName = job.clientName || 'Unknown Client'
-      page.drawText('Client:', {
-        x: 55,
-        y: boxY - 25,
-        size: 10,
-        font: font,
-        color: rgb(0.5, 0.5, 0.5)
-      })
-      page.drawText(clientName, {
-        x: 55,
-        y: boxY - 45,
-        size: 18,
-        font: fontBold,
-        color: rgb(0.1, 0.1, 0.1)
-      })
-      
-      // Address
-      const address = job.address || 'No address'
-      page.drawText('Site Address:', {
-        x: 55,
-        y: boxY - 75,
-        size: 10,
-        font: font,
-        color: rgb(0.5, 0.5, 0.5)
-      })
-      page.drawText(address, {
-        x: 55,
-        y: boxY - 95,
-        size: 12,
-        font: font,
-        color: rgb(0.2, 0.2, 0.2)
-      })
-      
-      // Date and postcode
-      page.drawText('Completion Date:', {
-        x: 55,
-        y: boxY - 115,
-        size: 10,
-        font: font,
-        color: rgb(0.5, 0.5, 0.5)
-      })
-      page.drawText(formatShortDate(job.startDate), {
-        x: 150,
-        y: boxY - 115,
-        size: 10,
-        font: font,
-        color: rgb(0.2, 0.2, 0.2)
-      })
-      
-      // Summary section
-      const summaryY = boxY - 180
-      page.drawText('Pack Summary', {
+      page.drawText('Client Details', {
         x: 50,
-        y: summaryY,
+        y: yPos,
         size: 16,
         font: fontBold,
-        color: rgb(0.1, 0.1, 0.1)
+        color: rgb(0.2, 0.2, 0.2)
       })
       
-      // Stats boxes
-      const statsY = summaryY - 40
-      const statBoxWidth = 150
-      const statBoxHeight = 60
-      const gap = 20
+      yPos -= 30
+      
+      page.drawText('Client:', { x: 50, y: yPos, size: 11, font: font, color: rgb(0.5, 0.5, 0.5) })
+      page.drawText(clientName, { x: 120, y: yPos, size: 11, font: fontBold, color: rgb(0.1, 0.1, 0.1) })
+      
+      yPos -= 20
+      page.drawText('Address:', { x: 50, y: yPos, size: 11, font: font, color: rgb(0.5, 0.5, 0.5) })
+      page.drawText(address, { x: 120, y: yPos, size: 11, font: font, color: rgb(0.1, 0.1, 0.1) })
+      
+      yPos -= 20
+      page.drawText('Postcode:', { x: 50, y: yPos, size: 11, font: font, color: rgb(0.5, 0.5, 0.5) })
+      page.drawText(postcode, { x: 120, y: yPos, size: 11, font: font, color: rgb(0.1, 0.1, 0.1) })
+      
+      yPos -= 20
+      page.drawText('Job Type:', { x: 50, y: yPos, size: 11, font: font, color: rgb(0.5, 0.5, 0.5) })
+      page.drawText(jobType === 'custom' && jobTypeDescription ? jobTypeDescription : jobType.replace(/_/g, ' '), { 
+        x: 120, y: yPos, size: 11, font: font, color: rgb(0.1, 0.1, 0.1) 
+      })
+      
+      yPos -= 20
+      page.drawText('Generated:', { x: 50, y: yPos, size: 11, font: font, color: rgb(0.5, 0.5, 0.5) })
+      page.drawText(new Date().toLocaleDateString('en-GB', { 
+        day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' 
+      }), { x: 120, y: yPos, size: 11, font: font, color: rgb(0.1, 0.1, 0.1) })
+      
+      // Summary section
+      yPos -= 50
+      page.drawLine({
+        start: { x: 50, y: yPos },
+        end: { x: width - 50, y: yPos },
+        thickness: 1,
+        color: rgb(0.8, 0.8, 0.8)
+      })
+      
+      yPos -= 30
+      page.drawText('Pack Summary', {
+        x: 50,
+        y: yPos,
+        size: 16,
+        font: fontBold,
+        color: rgb(0.2, 0.2, 0.2)
+      })
+      
+      yPos -= 30
+      
+      // Summary stats in boxes
+      const boxWidth = 150
+      const boxHeight = 60
+      const boxGap = 20
       
       // Tasks box
       page.drawRectangle({
         x: 50,
-        y: statsY - statBoxHeight,
-        width: statBoxWidth,
-        height: statBoxHeight,
-        borderColor: rgb(0.85, 0.85, 0.85),
+        y: yPos - boxHeight,
+        width: boxWidth,
+        height: boxHeight,
+        color: rgb(0.95, 0.95, 0.95),
+        borderColor: rgb(0.8, 0.8, 0.8),
         borderWidth: 1
       })
-      page.drawText('Tasks Completed', {
-        x: 60,
-        y: statsY - 20,
-        size: 10,
-        font: font,
-        color: rgb(0.5, 0.5, 0.5)
-      })
-      page.drawText(`${tasks.length}`, {
-        x: 60,
-        y: statsY - 45,
-        size: 24,
-        font: fontBold,
-        color: rgb(0.133, 0.545, 0.133)
-      })
+      page.drawText('Tasks', { x: 60, y: yPos - 20, size: 10, font: font, color: rgb(0.5, 0.5, 0.5) })
+      page.drawText(tasks.length.toString(), { x: 60, y: yPos - 45, size: 24, font: fontBold, color: rgb(0.133, 0.545, 0.133) })
       
       // Evidence box
       page.drawRectangle({
-        x: 50 + statBoxWidth + gap,
-        y: statsY - statBoxHeight,
-        width: statBoxWidth,
-        height: statBoxHeight,
-        borderColor: rgb(0.85, 0.85, 0.85),
+        x: 50 + boxWidth + boxGap,
+        y: yPos - boxHeight,
+        width: boxWidth,
+        height: boxHeight,
+        color: rgb(0.95, 0.95, 0.95),
+        borderColor: rgb(0.8, 0.8, 0.8),
         borderWidth: 1
       })
-      page.drawText('Evidence Items', {
-        x: 60 + statBoxWidth + gap,
-        y: statsY - 20,
-        size: 10,
-        font: font,
-        color: rgb(0.5, 0.5, 0.5)
-      })
-      page.drawText(`${evidence.length}`, {
-        x: 60 + statBoxWidth + gap,
-        y: statsY - 45,
-        size: 24,
-        font: fontBold,
-        color: rgb(0.133, 0.545, 0.133)
-      })
+      page.drawText('Evidence Items', { x: 60 + boxWidth + boxGap, y: yPos - 20, size: 10, font: font, color: rgb(0.5, 0.5, 0.5) })
+      page.drawText(evidence.length.toString(), { x: 60 + boxWidth + boxGap, y: yPos - 45, size: 24, font: fontBold, color: rgb(0.133, 0.545, 0.133) })
       
-      // Compliance box
+      // GPS Verified box
+      const gpsVerified = evidence.filter(e => e.latitude && e.longitude).length
       page.drawRectangle({
-        x: 50 + (statBoxWidth + gap) * 2,
-        y: statsY - statBoxHeight,
-        width: statBoxWidth,
-        height: statBoxHeight,
-        borderColor: rgb(0.85, 0.85, 0.85),
+        x: 50 + (boxWidth + boxGap) * 2,
+        y: yPos - boxHeight,
+        width: boxWidth,
+        height: boxHeight,
+        color: rgb(0.95, 0.95, 0.95),
+        borderColor: rgb(0.8, 0.8, 0.8),
         borderWidth: 1
       })
-      page.drawText('Compliance', {
-        x: 60 + (statBoxWidth + gap) * 2,
-        y: statsY - 20,
-        size: 10,
-        font: font,
-        color: rgb(0.5, 0.5, 0.5)
-      })
-      page.drawText('100%', {
-        x: 60 + (statBoxWidth + gap) * 2,
-        y: statsY - 45,
-        size: 24,
-        font: fontBold,
-        color: rgb(0.133, 0.545, 0.133)
-      })
+      page.drawText('GPS Verified', { x: 60 + (boxWidth + boxGap) * 2, y: yPos - 20, size: 10, font: font, color: rgb(0.5, 0.5, 0.5) })
+      page.drawText(gpsVerified.toString(), { x: 60 + (boxWidth + boxGap) * 2, y: yPos - 45, size: 24, font: fontBold, color: rgb(0.133, 0.545, 0.133) })
       
       // Verification section
-      const verifyY = statsY - statBoxHeight - 50
-      page.drawText('Verification Status', {
-        x: 50,
-        y: verifyY,
-        size: 14,
-        font: fontBold,
-        color: rgb(0.1, 0.1, 0.1)
-      })
-      
-      const checks = [
-        'All evidence GPS verified',
-        'Timestamps validated',
-        'SHA-256 hashes generated',
-        'Tamper-proof trail complete'
-      ]
-      
-      checks.forEach((check, i) => {
-        page.drawText('[OK]', {
-          x: 50,
-          y: verifyY - 25 - (i * 20),
-          size: 10,
-          font: fontBold,
-          color: rgb(0.133, 0.545, 0.133)
-        })
-        page.drawText(check, {
-          x: 80,
-          y: verifyY - 25 - (i * 20),
-          size: 11,
-          font: font,
-          color: rgb(0.3, 0.3, 0.3)
-        })
-      })
-      
-      // Verification box at bottom
-      const verifyBoxY = 140
+      const verifyBoxY = yPos - boxHeight - 50
       page.drawRectangle({
-        x: 40,
+        x: 50,
         y: verifyBoxY - 80,
-        width: width - 80,
+        width: 280,
         height: 80,
         color: rgb(0.95, 0.98, 0.95),
         borderColor: rgb(0.133, 0.545, 0.133),
         borderWidth: 1
       })
       
-      page.drawText('CRYPTOGRAPHICALLY VERIFIED', {
-        x: 55,
-        y: verifyBoxY - 25,
+      page.drawText('Tamper Verification', {
+        x: 60,
+        y: verifyBoxY - 20,
         size: 12,
         font: fontBold,
         color: rgb(0.133, 0.545, 0.133)
       })
       
-      page.drawText('This audit pack can be independently verified at:', {
-        x: 55,
-        y: verifyBoxY - 45,
+      page.drawText('Verify this pack online:', {
+        x: 60,
+        y: verifyBoxY - 40,
         size: 9,
         font: font,
         color: rgb(0.4, 0.4, 0.4)
       })
       
       page.drawText(verifyUrl, {
-        x: 55,
-        y: verifyBoxY - 60,
-        size: 9,
-        font: fontBold,
+        x: 60,
+        y: verifyBoxY - 55,
+        size: 8,
+        font: font,
         color: rgb(0.2, 0.4, 0.8)
       })
       
@@ -520,7 +423,7 @@ export default function PackPreview() {
       
       // Page 2: Evidence Log
       page = pdfDoc.addPage([595, 842])
-      let yPos = height - 60
+      yPos = height - 60
       
       page.drawText('Evidence Log', {
         x: 50,
@@ -581,173 +484,112 @@ export default function PackPreview() {
         const lat = item.latitude
         const lng = item.longitude
         const gps = lat && lng ? `${parseFloat(lat).toFixed(4)}, ${parseFloat(lng).toFixed(4)}` : 'N/A'
-        const hash = (item.photoHash || '').substring(0, 12) + '...'
+        const hash = item.photoHash ? item.photoHash.substring(0, 12) + '...' : 'N/A'
         
-        page.drawText(`${index + 1}`, { x: 50, y: yPos - 10, size: 9, font: font, color: rgb(0.4, 0.4, 0.4) })
-        page.drawText(evidenceType.substring(0, 15), { x: 70, y: yPos - 10, size: 8, font: font, color: rgb(0.2, 0.2, 0.2) })
-        page.drawText(stage, { x: 180, y: yPos - 10, size: 8, font: font, color: rgb(0.4, 0.4, 0.4) })
-        page.drawText(capturedAt, { x: 230, y: yPos - 10, size: 7, font: font, color: rgb(0.4, 0.4, 0.4) })
-        page.drawText(gps, { x: 330, y: yPos - 10, size: 7, font: font, color: rgb(0.4, 0.4, 0.4) })
-        page.drawText(hash, { x: 440, y: yPos - 10, size: 6, font: font, color: rgb(0.5, 0.5, 0.5) })
+        page.drawText((index + 1).toString(), { x: 50, y: yPos - 10, size: 8, font: font, color: rgb(0.4, 0.4, 0.4) })
+        page.drawText(evidenceType.substring(0, 18), { x: 70, y: yPos - 10, size: 8, font: font, color: rgb(0.2, 0.2, 0.2) })
+        page.drawText(stage, { x: 180, y: yPos - 10, size: 8, font: font, color: rgb(0.2, 0.2, 0.2) })
+        page.drawText(capturedAt, { x: 230, y: yPos - 10, size: 8, font: font, color: rgb(0.2, 0.2, 0.2) })
+        page.drawText(gps, { x: 330, y: yPos - 10, size: 8, font: font, color: rgb(0.2, 0.2, 0.2) })
+        page.drawText(hash, { x: 440, y: yPos - 10, size: 7, font: font, color: rgb(0.5, 0.5, 0.5) })
         
         yPos -= 22
       })
       
-      // Footer on evidence log page
-      yPos -= 40
-      page.drawLine({
-        start: { x: 50, y: yPos },
-        end: { x: width - 50, y: yPos },
-        thickness: 0.5,
-        color: rgb(0.8, 0.8, 0.8)
-      })
-      
-      page.drawText(`Generated by WorkProof on ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`, {
-        x: 50,
-        y: yPos - 20,
-        size: 9,
-        font: font,
-        color: rgb(0.5, 0.5, 0.5)
-      })
-      
-      page.drawText(`Verify: ${verifyUrl}`, {
-        x: 350,
-        y: yPos - 20,
-        size: 8,
-        font: font,
-        color: rgb(0.2, 0.4, 0.8)
-      })
-      
-      // Photo pages - one photo per page
-      setGeneratingStatus(`Embedding photos (0/${evidence.length})...`)
+      // Photo Pages - One photo per page
+      setGeneratingStatus('Embedding photos...')
       
       for (let i = 0; i < evidence.length; i++) {
         const item = evidence[i]
-        if (!item) continue
-        
-        setGeneratingStatus(`Embedding photos (${i + 1}/${evidence.length})...`)
-        
         if (!item.photoUrl) continue
+        
+        setGeneratingStatus(`Embedding photo ${i + 1} of ${evidence.length}...`)
         
         try {
           const imageBytes = await fetchImageBytes(item.photoUrl)
           if (!imageBytes) continue
           
-          // Determine image type and embed
-          let embeddedImage
-          const isJpg = item.photoUrl.toLowerCase().includes('.jpg') || 
-                        item.photoUrl.toLowerCase().includes('.jpeg')
-          
-          try {
-            if (isJpg) {
-              embeddedImage = await pdfDoc.embedJpg(imageBytes)
-            } else {
-              embeddedImage = await pdfDoc.embedPng(imageBytes)
-            }
-          } catch {
-            // Try the other format if first fails
-            try {
-              embeddedImage = isJpg 
-                ? await pdfDoc.embedPng(imageBytes)
-                : await pdfDoc.embedJpg(imageBytes)
-            } catch {
-              continue // Skip this image
-            }
-          }
-          
-          // Create new page for this photo
           page = pdfDoc.addPage([595, 842])
           
           // Header
-          page.drawText(`Evidence ${i + 1} of ${evidence.length}`, {
-            x: 50,
-            y: height - 40,
-            size: 12,
-            font: fontBold,
+          page.drawRectangle({
+            x: 0,
+            y: height - 50,
+            width: width,
+            height: 50,
             color: rgb(0.133, 0.545, 0.133)
           })
           
-          const evidenceType = (item.evidenceType || 'unknown').replace(/_/g, ' ')
-          page.drawText(evidenceType.charAt(0).toUpperCase() + evidenceType.slice(1), {
+          const evidenceType = (item.evidenceType || 'Evidence').replace(/_/g, ' ')
+          const stage = item.photoStage ? ` - ${item.photoStage.charAt(0).toUpperCase() + item.photoStage.slice(1)}` : ''
+          page.drawText(`${evidenceType}${stage}`, {
             x: 50,
-            y: height - 60,
-            size: 16,
+            y: height - 32,
+            size: 14,
             font: fontBold,
-            color: rgb(0.1, 0.1, 0.1)
+            color: rgb(1, 1, 1)
           })
           
-          // Photo stage badge
-          if (item.photoStage) {
-            const stageColors: Record<string, { r: number; g: number; b: number }> = {
-              before: { r: 0.92, g: 0.85, b: 0.65 },
-              during: { r: 0.65, g: 0.85, b: 0.92 },
-              after: { r: 0.65, g: 0.92, b: 0.70 }
-            }
-            const defaultColor = { r: 0.92, g: 0.85, b: 0.65 }
-            const stageColor = stageColors[item.photoStage] ?? defaultColor
-            
-            page.drawRectangle({
-              x: 200,
-              y: height - 68,
-              width: 60,
-              height: 18,
-              color: rgb(stageColor.r, stageColor.g, stageColor.b)
-            })
-            page.drawText(item.photoStage.toUpperCase(), {
-              x: 210,
-              y: height - 62,
-              size: 8,
-              font: fontBold,
-              color: rgb(0.3, 0.3, 0.3)
-            })
+          page.drawText(`Photo ${i + 1} of ${evidence.length}`, {
+            x: width - 120,
+            y: height - 32,
+            size: 10,
+            font: font,
+            color: rgb(0.9, 0.9, 0.9)
+          })
+          
+          // Embed image
+          let image
+          try {
+            image = await pdfDoc.embedJpg(imageBytes)
+          } catch {
+            image = await pdfDoc.embedPng(imageBytes)
           }
           
-          // Calculate image dimensions to fit on page
+          // Calculate dimensions to fit
           const maxWidth = width - 100
-          const maxHeight = 480
-          const imgWidth = embeddedImage.width
-          const imgHeight = embeddedImage.height
+          const maxHeight = 450
+          const imgDims = image.scale(1)
           
-          let displayWidth = imgWidth
-          let displayHeight = imgHeight
+          let drawWidth = imgDims.width
+          let drawHeight = imgDims.height
           
-          // Scale down if needed
-          if (displayWidth > maxWidth) {
-            const scale = maxWidth / displayWidth
-            displayWidth = maxWidth
-            displayHeight = imgHeight * scale
-          }
-          if (displayHeight > maxHeight) {
-            const scale = maxHeight / displayHeight
-            displayHeight = maxHeight
-            displayWidth = displayWidth * scale
+          if (drawWidth > maxWidth) {
+            const scale = maxWidth / drawWidth
+            drawWidth = maxWidth
+            drawHeight = drawHeight * scale
           }
           
-          // Center the image
-          const imgX = (width - displayWidth) / 2
-          const imgY = height - 90 - displayHeight
+          if (drawHeight > maxHeight) {
+            const scale = maxHeight / drawHeight
+            drawHeight = maxHeight
+            drawWidth = drawWidth * scale
+          }
           
-          // Draw image with border
+          const imgX = (width - drawWidth) / 2
+          const imgY = height - 100 - drawHeight
+          
+          // Image border
           page.drawRectangle({
-            x: imgX - 2,
-            y: imgY - 2,
-            width: displayWidth + 4,
-            height: displayHeight + 4,
+            x: imgX - 5,
+            y: imgY - 5,
+            width: drawWidth + 10,
+            height: drawHeight + 10,
             borderColor: rgb(0.8, 0.8, 0.8),
             borderWidth: 1
           })
           
-          page.drawImage(embeddedImage, {
+          page.drawImage(image, {
             x: imgX,
             y: imgY,
-            width: displayWidth,
-            height: displayHeight
+            width: drawWidth,
+            height: drawHeight
           })
           
           // Metadata below image
           const metaY = imgY - 30
           
-          // Captured timestamp
+          // Timestamp
           page.drawText('Captured:', {
             x: 50,
             y: metaY,
@@ -759,7 +601,7 @@ export default function PackPreview() {
             x: 110,
             y: metaY,
             size: 9,
-            font: font,
+            font: fontBold,
             color: rgb(0.2, 0.2, 0.2)
           })
           
@@ -791,7 +633,7 @@ export default function PackPreview() {
             }
           }
           
-          // Notes if present
+          // Notes
           if (item.notes) {
             page.drawText('Notes:', {
               x: 50,
@@ -800,7 +642,7 @@ export default function PackPreview() {
               font: font,
               color: rgb(0.5, 0.5, 0.5)
             })
-            page.drawText(item.notes.substring(0, 80) + (item.notes.length > 80 ? '...' : ''), {
+            page.drawText(item.notes.substring(0, 80), {
               x: 110,
               y: metaY - 36,
               size: 9,
@@ -821,7 +663,7 @@ export default function PackPreview() {
             page.drawText(item.photoHash, {
               x: 110,
               y: metaY - 54,
-              size: 6,
+              size: 7,
               font: font,
               color: rgb(0.4, 0.4, 0.4)
             })
@@ -865,11 +707,6 @@ export default function PackPreview() {
       document.body.removeChild(link)
       URL.revokeObjectURL(url)
       
-      // Step 3: Mark audit pack as downloaded
-      if (auditPackId) {
-        await auditPackApi.markDownloaded(auditPackId, token)
-      }
-      
     } catch (err) {
       captureError(err, 'PackPreview.generatePDF')
       trackError('pdf_generation_error', err instanceof Error ? err.message : 'Unknown error')
@@ -887,32 +724,29 @@ export default function PackPreview() {
   }, 0)
   
   const completionPercent = totalRequired > 0 
-    ? Math.round((evidence.length / totalRequired) * 100)
+    ? Math.round((evidence.length / totalRequired) * 100) 
     : 0
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="w-8 h-8 animate-spin text-green-600" />
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-green-500 animate-spin" />
       </div>
     )
   }
 
-  if (error || !job) {
+  if (error) {
     return (
-      <div className="space-y-4">
-        <button
-          onClick={() => navigate('/packs')}
-          className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back to Packs
-        </button>
-        <div className="card bg-red-50 border-red-200">
-          <div className="flex items-center gap-3">
-            <AlertCircle className="w-5 h-5 text-red-500" />
-            <p className="text-red-800">{error || 'Pack not found'}</p>
-          </div>
+      <div className="min-h-screen bg-gray-900 p-4">
+        <div className="max-w-lg mx-auto mt-20 bg-red-900/20 border border-red-500 rounded-lg p-6 text-center">
+          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <p className="text-red-400 mb-4">{error}</p>
+          <button
+            onClick={() => navigate('/packs')}
+            className="text-green-400 hover:text-green-300"
+          >
+            ← Back to Packs
+          </button>
         </div>
       </div>
     )
@@ -921,166 +755,165 @@ export default function PackPreview() {
   return (
     <>
       <Helmet>
-        <title>Pack Preview - {job.clientName} | WorkProof</title>
-        <meta name="robots" content="noindex, nofollow" />
+        <title>Audit Pack Preview - WorkProof</title>
       </Helmet>
-
-      <div className="space-y-6 animate-fade-in pb-24">
+      
+      <div className="min-h-screen bg-gray-900 pb-24">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => navigate('/packs')}
-            className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Packs
-          </button>
-          
-          <span className={`badge ${completionPercent >= 100 ? 'badge-green' : 'badge-amber'}`}>
-            {completionPercent >= 100 ? 'Ready for Export' : `${completionPercent}% Complete`}
-          </span>
-        </div>
-
-        {/* Job Info Card */}
-        <div className="card">
-          <h1 className="text-xl font-bold text-gray-900 mb-1">
-            {job.clientName || 'Unknown Client'}
-          </h1>
-          <div className="flex items-center gap-1 text-gray-500 text-sm mb-4">
-            <MapPin className="w-4 h-4" />
-            {job.address || 'No address'}
-          </div>
-          
-          {/* Stats */}
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            <div className="text-center p-3 bg-gray-50 rounded-lg">
-              <p className="text-2xl font-bold text-green-600">{tasks.length}</p>
-              <p className="text-xs text-gray-500">Tasks</p>
-            </div>
-            <div className="text-center p-3 bg-gray-50 rounded-lg">
-              <p className="text-2xl font-bold text-green-600">{evidence.length}</p>
-              <p className="text-xs text-gray-500">Evidence</p>
-            </div>
-            <div className="text-center p-3 bg-gray-50 rounded-lg">
-              <p className="text-2xl font-bold text-green-600">{completionPercent}%</p>
-              <p className="text-xs text-gray-500">Complete</p>
-            </div>
-          </div>
-
-          {/* Compliance Badges */}
-          <div className="flex flex-wrap gap-2">
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-50 text-green-700 rounded text-xs">
-              <Shield className="w-3 h-3" />
-              GPS Verified
-            </span>
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-50 text-green-700 rounded text-xs">
-              <Clock className="w-3 h-3" />
-              Timestamps Valid
-            </span>
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-50 text-green-700 rounded text-xs">
-              <CheckCircle className="w-3 h-3" />
-              Tamper-Proof
-            </span>
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-50 text-green-700 rounded text-xs">
-              <QrCode className="w-3 h-3" />
-              QR Verifiable
-            </span>
-          </div>
-        </div>
-
-        {/* Tasks with Evidence */}
-        {tasks.map(task => {
-          const config = getTaskTypeConfig(task.taskType as TaskType)
-          const taskEvidence = evidence.filter(e => e.taskId === task.id)
-          
-          return (
-            <div key={task.id} className="card">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h3 className="font-medium text-gray-900">
-                    {config?.label || task.taskType}
-                  </h3>
-                  <p className="text-sm text-gray-500">
-                    {taskEvidence.length}/{config?.requiredEvidence.length || 0} photos
-                  </p>
-                </div>
-                {config?.partPNotifiable && (
-                  <span className="badge badge-blue">Part P</span>
-                )}
-              </div>
-              
-              {/* Evidence Grid */}
-              {taskEvidence.length > 0 ? (
-                <div className="grid grid-cols-4 gap-2">
-                  {taskEvidence.map(item => (
-                    <button
-                      key={item.id}
-                      onClick={() => setSelectedImage(item)}
-                      className="relative aspect-square rounded-lg overflow-hidden bg-gray-100 hover:opacity-90 transition-opacity"
-                    >
-                      {item.photoUrl ? (
-                        <img
-                          src={item.photoUrl}
-                          alt={item.evidenceType}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <Camera className="w-6 h-6 text-gray-400" />
-                        </div>
-                      )}
-                      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1">
-                        <p className="text-white text-[10px] truncate">
-                          {(item.evidenceType || '').replace(/_/g, ' ')}
-                        </p>
-                      </div>
-                      {item.photoStage && (
-                        <div className={`absolute top-1 left-1 px-1 py-0.5 rounded text-[8px] font-medium ${
-                          item.photoStage === 'before' ? 'bg-amber-100 text-amber-700' :
-                          item.photoStage === 'during' ? 'bg-blue-100 text-blue-700' :
-                          'bg-green-100 text-green-700'
-                        }`}>
-                          {item.photoStage}
-                        </div>
-                      )}
-                      <div className="absolute top-1 right-1">
-                        <CheckCircle className="w-4 h-4 text-green-400 drop-shadow" />
-                      </div>
-                    </button>
-                  ))}
-                </div>
+        <div className="bg-gray-800 border-b border-gray-700 px-4 py-4">
+          <div className="max-w-4xl mx-auto flex items-center justify-between">
+            <button
+              onClick={() => navigate('/packs')}
+              className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              <span>Back</span>
+            </button>
+            
+            <h1 className="text-lg font-semibold text-white">Audit Pack Preview</h1>
+            
+            <button
+              onClick={generatePDF}
+              disabled={isGenerating || evidence.length === 0}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg transition-colors"
+            >
+              {isGenerating ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span className="hidden sm:inline">Generating...</span>
+                </>
               ) : (
-                <div className="text-center py-4 text-gray-400">
-                  <Camera className="w-6 h-6 mx-auto mb-1" />
-                  <p className="text-sm">No evidence captured</p>
-                </div>
+                <>
+                  <Download className="w-4 h-4" />
+                  <span className="hidden sm:inline">Download PDF</span>
+                </>
               )}
+            </button>
+          </div>
+        </div>
+        
+        {/* Generation Status */}
+        {isGenerating && generatingStatus && (
+          <div className="bg-green-900/30 border-b border-green-700 px-4 py-2">
+            <div className="max-w-4xl mx-auto flex items-center gap-2 text-green-400 text-sm">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              {generatingStatus}
             </div>
-          )
-        })}
-
-        {/* Download Button - Fixed at bottom */}
-        <div className="fixed bottom-20 left-4 right-4 max-w-lg mx-auto">
-          <button
-            onClick={generatePDF}
-            disabled={isGenerating || evidence.length === 0}
-            className="w-full btn-primary py-4 flex items-center justify-center gap-2 shadow-lg disabled:opacity-50"
-          >
-            {isGenerating ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                {generatingStatus || 'Generating PDF...'}
-              </>
-            ) : (
-              <>
-                <Download className="w-5 h-5" />
-                Download Audit Pack
-              </>
-            )}
-          </button>
+          </div>
+        )}
+        
+        {/* Job Details */}
+        <div className="max-w-4xl mx-auto p-4">
+          <div className="bg-gray-800 rounded-lg p-4 mb-6">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h2 className="text-xl font-bold text-white">{job?.clientName || 'Unknown Client'}</h2>
+                <div className="flex items-center gap-2 text-gray-400 mt-1">
+                  <MapPin className="w-4 h-4" />
+                  <span>{job?.address}, {job?.postcode}</span>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-bold text-green-500">{completionPercent}%</div>
+                <div className="text-sm text-gray-400">Complete</div>
+              </div>
+            </div>
+            
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-4">
+              <div className="bg-gray-700/50 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-white">{tasks.length}</div>
+                <div className="text-sm text-gray-400">Tasks</div>
+              </div>
+              <div className="bg-gray-700/50 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-white">{evidence.length}</div>
+                <div className="text-sm text-gray-400">Evidence</div>
+              </div>
+              <div className="bg-gray-700/50 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-white">
+                  {evidence.filter(e => e.latitude && e.longitude).length}
+                </div>
+                <div className="text-sm text-gray-400">GPS Tagged</div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Verification Info */}
+          <div className="bg-green-900/20 border border-green-700 rounded-lg p-4 mb-6">
+            <div className="flex items-center gap-3">
+              <QrCode className="w-8 h-8 text-green-500" />
+              <div>
+                <h3 className="font-semibold text-green-400">Tamper Verification</h3>
+                <p className="text-sm text-gray-400">
+                  Your PDF will include a QR code for instant online verification
+                </p>
+              </div>
+            </div>
+          </div>
+          
+          {/* Evidence Grid */}
+          <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+            <Camera className="w-5 h-5 text-green-500" />
+            Evidence ({evidence.length})
+          </h3>
+          
+          {evidence.length === 0 ? (
+            <div className="bg-gray-800 rounded-lg p-8 text-center">
+              <Camera className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+              <p className="text-gray-400">No evidence captured yet</p>
+              <p className="text-sm text-gray-500 mt-1">Add photos to your tasks first</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {evidence.map((item) => (
+                <div
+                  key={item.id}
+                  onClick={() => setSelectedImage(item)}
+                  className="relative aspect-square bg-gray-800 rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-green-500 transition-all"
+                >
+                  {item.photoUrl ? (
+                    <img
+                      src={item.photoUrl}
+                      alt={item.evidenceType}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <Camera className="w-8 h-8 text-gray-600" />
+                    </div>
+                  )}
+                  
+                  {/* Badges */}
+                  <div className="absolute top-2 left-2 flex flex-col gap-1">
+                    {item.latitude && item.longitude && (
+                      <span className="bg-green-500 text-white text-xs px-1.5 py-0.5 rounded flex items-center gap-1">
+                        <MapPin className="w-3 h-3" />
+                      </span>
+                    )}
+                    {item.photoHash && (
+                      <span className="bg-blue-500 text-white text-xs px-1.5 py-0.5 rounded flex items-center gap-1">
+                        <Shield className="w-3 h-3" />
+                      </span>
+                    )}
+                  </div>
+                  
+                  {/* Stage badge */}
+                  {item.photoStage && (
+                    <span className={`absolute bottom-2 right-2 text-xs px-2 py-0.5 rounded ${
+                      item.photoStage === 'before' ? 'bg-amber-100 text-amber-700' :
+                      item.photoStage === 'during' ? 'bg-blue-100 text-blue-700' :
+                      'bg-green-100 text-green-700'
+                    }`}>
+                      {item.photoStage}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
-
+      
       {/* Image Modal */}
       {selectedImage && (
         <div 
@@ -1089,30 +922,27 @@ export default function PackPreview() {
         >
           <button
             onClick={() => setSelectedImage(null)}
-            className="absolute top-4 right-4 text-white p-2"
+            className="absolute top-4 right-4 text-white hover:text-gray-300"
           >
-            <X className="w-6 h-6" />
+            <X className="w-8 h-8" />
           </button>
           
-          <div className="max-w-2xl w-full" onClick={e => e.stopPropagation()}>
-            {selectedImage.photoUrl ? (
+          <div className="max-w-4xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            {selectedImage.photoUrl && (
               <img
                 src={selectedImage.photoUrl}
                 alt={selectedImage.evidenceType}
-                className="w-full rounded-lg"
+                className="max-h-[60vh] object-contain rounded-lg"
               />
-            ) : (
-              <div className="w-full h-64 bg-gray-800 rounded-lg flex items-center justify-center">
-                <Camera className="w-12 h-12 text-gray-600" />
-              </div>
             )}
-            <div className="mt-4 text-white space-y-2">
-              <div className="flex items-center gap-2">
-                <h3 className="font-medium text-lg">
-                  {(selectedImage.evidenceType || '').replace(/_/g, ' ')}
-                </h3>
+            
+            <div className="bg-gray-800 rounded-lg p-4 mt-4">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-white font-semibold">
+                  {selectedImage.evidenceType?.replace(/_/g, ' ')}
+                </span>
                 {selectedImage.photoStage && (
-                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                  <span className={`text-xs px-2 py-0.5 rounded ${
                     selectedImage.photoStage === 'before' ? 'bg-amber-100 text-amber-700' :
                     selectedImage.photoStage === 'during' ? 'bg-blue-100 text-blue-700' :
                     'bg-green-100 text-green-700'
