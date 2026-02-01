@@ -64,3 +64,95 @@ export const AUDIT_PACK_FIELDS = {
   shared_with: 'sb0a19da8f'
 } as const
 
+// Evidence Type: App Key -> SmartSuite Option ID
+// Used when saving evidence to convert app keys to SmartSuite IDs
+export const EVIDENCE_TYPE_IDS: Record<string, string> = {
+  // Consumer Unit
+  existing_board_condition: 'mVsNo',
+  isolation_confirmation: 'FTVO5',
+  new_board_installed: 'RvRbr',
+  main_earth_bonding: '3jYOf',
+  completed_installation: 'Q5wfk',
+  
+  // Rewire
+  cable_route: 'nLeez',
+  containment: 'YFZBw',
+  connection_points: 'cN18H',
+  db_photo: '1YrTO',
+  
+  // EICR
+  sample_circuit_tests: 'F826r',
+  defects_found: 'E2lOv',
+  
+  // Emergency Lighting
+  luminaire_photo: 'sMhQ9',
+  battery_test_readings: '1M3gg',
+  logbook_entry: 'nZKk1',
+  
+  // Fire Alarm
+  panel_photo: 'XNwfW',
+  device_test_log: 'jSpIt',
+  call_point_activation: 'CxWPt',
+  
+  // EV Charger
+  location_photo: 'gLnR1',
+  protective_device: 'XMyuc',
+  dno_notification: 'SfzfC',
+  
+  // Fault Finding
+  initial_fault_indication: '3FyTK',
+  investigation_photos: 'dvGWa',
+  resolution: '8aZOR',
+  test_confirmation: 'zHfbD',
+  
+  // PAT Testing
+  equipment_photo: 'x0eqD',
+  label_applied: 'c7LhE',
+  test_result: 'yoJ7D',
+  
+  // Smoke Alarm
+  location_compliance: 'hRjl8',
+  alarm_photo: 'xaQrd',
+  test_activation: 'xKIP1',
+  
+  // Solar PV
+  array_location: 'fDfmf',
+  inverter: 'YO3iv',
+  ac_dc_isolators: '708g2',
+  g98_g99_submission: 'OJe8U',
+  dno_acceptance: 'KtV9n',
+  
+  // Bathroom
+  zone_identification: '537Fm',
+  rcd_protection: '5ZTN3',
+  bonding_connections: 'ShjqB',
+  
+  // Kitchen
+  circuit_layout: 'fCB6P',
+  isolation_switch: 'SivU5',
+  
+  // Data/Network
+  device_locations: 'XjFcs',
+  
+  // CCTV
+  camera_locations: '42Gf9',
+  recorder_location: 's4R4Q',
+  
+  // Common/Shared
+  before_photo: '4hldz',
+  after_photo: 'bPV1p',
+  test_meter_readings: 'uR5fB',
+  certificate_photo: '1VlrY',
+  labelling: 'c7LhE',
+  test_instrument_calibration: 'X3Lrf',
+  earthing_arrangement: 'qytQX',
+  wiring_photo: 'f2QeD',
+  additional_evidence: 'Dxpai'
+} as const
+
+// Reverse mapping: SmartSuite Option ID -> App Key
+// Used when reading evidence to convert SmartSuite IDs back to app keys
+export const EVIDENCE_TYPE_KEYS: Record<string, string> = Object.fromEntries(
+  Object.entries(EVIDENCE_TYPE_IDS).map(([key, value]) => [value, key])
+)
+
