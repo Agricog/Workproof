@@ -681,7 +681,8 @@ export default function PackPreview() {
               during: { r: 0.65, g: 0.85, b: 0.92 },
               after: { r: 0.65, g: 0.92, b: 0.70 }
             }
-            const stageColor = stageColors[item.photoStage] || stageColors.before
+            const defaultColor = { r: 0.92, g: 0.85, b: 0.65 }
+            const stageColor = stageColors[item.photoStage] ?? defaultColor
             
             page.drawRectangle({
               x: 200,
