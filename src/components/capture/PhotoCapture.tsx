@@ -2,8 +2,8 @@
  * WorkProof Photo Capture Component
  * Captures photos with GPS, timestamp, hash, photo stage, and notes for immutable evidence
  */
-import { useState, useEffect, useCallback } from 'react'
-import { Camera, X, RotateCcw, Check, MapPin, Clock, AlertCircle, FileText, Zap } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Camera, X, RotateCcw, Check, MapPin, Clock, AlertCircle, FileText, Zap, Mic, Square, Loader2 } from 'lucide-react'
 import { useCamera } from '../../hooks/useCamera'
 import { useGeolocation } from '../../hooks/useGeolocation'
 import { compressImage, generateThumbnail, blobToBase64 } from '../../utils/compression'
@@ -89,6 +89,16 @@ export default function PhotoCapture({
     polarity: null
   })
   
+  // Voice recording state
+  const [isRecording, setIsRecording] = useState(false)
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
+  const [audioTranscript, setAudioTranscript] = useState<string | null>(null)
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const [recordingTime, setRecordingTime] = useState(0)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null)
+  
   // Check if this evidence type needs test results
   const showTestResults = TEST_EVIDENCE_TYPES.includes(evidenceType)
 
@@ -141,6 +151,117 @@ export default function PhotoCapture({
       continuity: '',
       polarity: null
     })
+    setAudioBlob(null)
+    setAudioTranscript(null)
+    setRecordingTime(0)
+  }, [])
+
+  // Voice recording functions
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+      mediaRecorderRef.current = mediaRecorder
+      audioChunksRef.current = []
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data)
+        }
+      }
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        setAudioBlob(audioBlob)
+        
+        // Stop all tracks
+        stream.getTracks().forEach(track => track.stop())
+        
+        // Clear timer
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current)
+          recordingTimerRef.current = null
+        }
+        
+        // Auto-transcribe
+        await transcribeAudio(audioBlob)
+      }
+
+      mediaRecorder.start()
+      setIsRecording(true)
+      setRecordingTime(0)
+      
+      // Start timer
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime(prev => {
+          if (prev >= 30) {
+            // Auto-stop at 30 seconds
+            stopRecording()
+            return prev
+          }
+          return prev + 1
+        })
+      }, 1000)
+      
+    } catch (error) {
+      console.error('Failed to start recording:', error)
+      setSaveError('Microphone access denied')
+    }
+  }, [])
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+    }
+  }, [])
+
+  const transcribeAudio = async (blob: Blob) => {
+    setIsTranscribing(true)
+    try {
+      // Convert blob to base64
+      const reader = new FileReader()
+      const base64Promise = new Promise<string>((resolve) => {
+        reader.onloadend = () => {
+          const base64 = reader.result as string
+          resolve(base64.split(',')[1]) // Remove data URL prefix
+        }
+      })
+      reader.readAsDataURL(blob)
+      const audioBase64 = await base64Promise
+
+      // Send to backend for transcription
+      const response = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio: audioBase64 })
+      })
+
+      if (response.ok) {
+        const { transcript } = await response.json()
+        setAudioTranscript(transcript)
+        // Append to notes if transcript exists
+        if (transcript) {
+          setNotes(prev => prev ? `${prev}\n\n🎤 ${transcript}` : `🎤 ${transcript}`)
+        }
+      } else {
+        console.error('Transcription failed')
+        setAudioTranscript('[Transcription failed - audio saved]')
+      }
+    } catch (error) {
+      console.error('Transcription error:', error)
+      setAudioTranscript('[Transcription failed - audio saved]')
+    } finally {
+      setIsTranscribing(false)
+    }
+  }
+
+  const deleteRecording = useCallback(() => {
+    setAudioBlob(null)
+    setAudioTranscript(null)
+    setRecordingTime(0)
+    // Remove voice note from notes if present
+    setNotes(prev => prev.replace(/\n\n🎤 .*$/s, '').replace(/^🎤 .*$/s, ''))
   }, [])
 
   const handleConfirm = useCallback(async () => {
@@ -192,6 +313,9 @@ export default function PhotoCapture({
         testRcdTripTime: testResults.rcdTripTime ? parseFloat(testResults.rcdTripTime) : null,
         testContinuity: testResults.continuity ? parseFloat(testResults.continuity) : null,
         testPolarity: testResults.polarity,
+        // Voice note (base64 audio data)
+        audioData: audioBlob ? await blobToBase64(audioBlob) : null,
+        audioTranscript: audioTranscript,
       }
 
       // Save to IndexedDB
@@ -212,7 +336,7 @@ export default function PhotoCapture({
     } finally {
       setIsSaving(false)
     }
-  }, [capturedBlob, thumbnail, notes, taskId, jobId, evidenceType, photoStage, customName, workerId, location, testResults, onCapture])
+  }, [capturedBlob, thumbnail, notes, taskId, jobId, evidenceType, photoStage, customName, workerId, location, testResults, audioBlob, audioTranscript, onCapture])
 
   // Display label - use customName if provided
   const displayLabel = customName || label
@@ -345,6 +469,75 @@ export default function PhotoCapture({
             />
           </div>
           <p className="text-gray-500 text-xs text-right mt-1">{notes.length}/500</p>
+        </div>
+      )}
+
+      {/* Voice Note - shown after photo capture */}
+      {capturedBlob && (
+        <div className="bg-gray-800 border-t border-gray-700 px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Mic className="w-5 h-5 text-purple-400" />
+              <span className="text-white font-medium text-sm">Voice Note</span>
+              <span className="text-gray-500 text-xs">(max 30s)</span>
+            </div>
+            
+            {!audioBlob && !isRecording && (
+              <button
+                type="button"
+                onClick={startRecording}
+                className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm transition-colors"
+              >
+                <Mic className="w-4 h-4" />
+                Record
+              </button>
+            )}
+            
+            {isRecording && (
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                  <span className="text-red-400 text-sm font-mono">{recordingTime}s</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={stopRecording}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm transition-colors"
+                >
+                  <Square className="w-4 h-4" />
+                  Stop
+                </button>
+              </div>
+            )}
+            
+            {audioBlob && !isRecording && (
+              <div className="flex items-center gap-2">
+                {isTranscribing ? (
+                  <div className="flex items-center gap-2 text-purple-400 text-sm">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Transcribing...
+                  </div>
+                ) : (
+                  <>
+                    <span className="text-green-400 text-sm">✓ Recorded</span>
+                    <button
+                      type="button"
+                      onClick={deleteRecording}
+                      className="text-gray-400 hover:text-red-400 text-sm"
+                    >
+                      Delete
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+          
+          {audioTranscript && (
+            <div className="mt-2 p-2 bg-gray-700 rounded-lg">
+              <p className="text-gray-300 text-sm italic">"{audioTranscript}"</p>
+            </div>
+          )}
         </div>
       )}
 
