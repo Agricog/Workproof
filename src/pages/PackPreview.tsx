@@ -165,14 +165,24 @@ export default function PackPreview() {
     }
   }
 
-  // Fetch QR code from free API - no npm package needed
+  // Fetch QR code via server proxy to comply with CSP
   const fetchQRCodeBytes = async (url: string): Promise<Uint8Array | null> => {
     try {
+      const token = await getToken()
+      const API_BASE = import.meta.env.VITE_API_URL || ''
+      
+      // Route through server proxy to comply with Content Security Policy
       const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&format=png&data=${encodeURIComponent(url)}`
+      const proxyUrl = `${API_BASE}/api/images/proxy?url=${encodeURIComponent(qrApiUrl)}`
       
-      const response = await fetch(qrApiUrl)
+      const response = await fetch(proxyUrl, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        credentials: 'include'
+      })
+      
       if (!response.ok) return null
-      
       const arrayBuffer = await response.arrayBuffer()
       return new Uint8Array(arrayBuffer)
     } catch (err) {
