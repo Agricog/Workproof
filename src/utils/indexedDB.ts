@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = 'workproof'
-const DB_VERSION = 1
+const DB_VERSION = 2 // Bumped for new fields
 const STORAGE_WARNING_THRESHOLD = 0.8 // 80% of quota
 
 export interface StoredEvidence {
@@ -25,6 +25,12 @@ export interface StoredEvidence {
   synced: boolean
   syncedAt: string | null
   createdAt: string
+  // Test result fields
+  testVoltage: number | null
+  testResistance: number | null
+  testRcdTripTime: number | null
+  testContinuity: number | null
+  testPolarity: 'pass' | 'fail' | null
 }
 
 export interface SyncQueueItem {
