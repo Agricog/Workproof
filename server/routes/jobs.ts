@@ -266,6 +266,100 @@ jobs.get('/:id', async (c) => {
   }
 })
 
+// Get job with all tasks and evidence (for pack preview - single API call)
+jobs.get('/:id/pack-data', async (c) => {
+  const auth = getAuth(c)
+  const jobId = c.req.param('id')
+  const client = getSmartSuiteClient()
+
+  try {
+    const userRecordId = await getUserRecordId(auth.userId)
+    if (!userRecordId) {
+      return c.json({ error: 'User not found' }, 404)
+    }
+
+    // Fetch everything in parallel - single round trip to SmartSuite
+    const [job, tasksResult, evidenceResult] = await Promise.all([
+      client.getRecord<Job>(TABLES.JOBS, jobId),
+      client.listRecords<Task>(TABLES.TASKS, { limit: 500 }),
+      client.listRecords<Evidence>(TABLES.EVIDENCE, { limit: 1000 })
+    ])
+
+    // Verify ownership
+    if (!userOwnsJob(job as unknown as Record<string, unknown>, userRecordId)) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
+
+    // Get tasks for this job
+    const jobTasks = getTasksForJob(tasksResult.items, jobId)
+    const taskIds = jobTasks.map(t => t.id)
+
+    // Get evidence for these tasks
+    const jobEvidence = evidenceResult.items.filter(ev => {
+      const evTaskIds = (ev as unknown as Record<string, unknown>)[EVIDENCE_FIELDS.task] as string[] | string | undefined
+      if (!evTaskIds) return false
+      const ids = Array.isArray(evTaskIds) ? evTaskIds : [evTaskIds]
+      return ids.some(id => taskIds.includes(id))
+    })
+
+    // Transform job
+    const transformedJob = transformJob(
+      job as unknown as Record<string, unknown>,
+      jobTasks.length,
+      jobEvidence.length
+    )
+
+    // Transform tasks
+    const transformedTasks = jobTasks.map(task => {
+      const t = task as unknown as Record<string, unknown>
+      return {
+        id: t.id,
+        jobId: jobId,
+        taskType: t[TASK_FIELDS.task_type] || 'unknown',
+        status: t[TASK_FIELDS.status] || 'pending',
+        notes: t[TASK_FIELDS.notes] || '',
+        order: t[TASK_FIELDS.order] || 0
+      }
+    })
+
+    // Transform evidence
+    const transformedEvidence = jobEvidence.map(ev => {
+      const e = ev as unknown as Record<string, unknown>
+      const taskField = e[EVIDENCE_FIELDS.task]
+      const taskId = Array.isArray(taskField) ? taskField[0] : taskField
+
+      // Handle date fields
+      const capturedAtRaw = e[EVIDENCE_FIELDS.captured_at]
+      const capturedAt = capturedAtRaw && typeof capturedAtRaw === 'object' && 'date' in capturedAtRaw
+        ? (capturedAtRaw as { date: string }).date
+        : capturedAtRaw
+
+      return {
+        id: e.id,
+        taskId: taskId,
+        evidenceType: e[EVIDENCE_FIELDS.evidence_type] || 'unknown',
+        photoStage: e[EVIDENCE_FIELDS.photo_stage] || null,
+        photoUrl: e[EVIDENCE_FIELDS.photo_url] || null,
+        photoHash: e[EVIDENCE_FIELDS.photo_hash] || null,
+        latitude: e[EVIDENCE_FIELDS.latitude] || null,
+        longitude: e[EVIDENCE_FIELDS.longitude] || null,
+        gpsAccuracy: e[EVIDENCE_FIELDS.gps_accuracy] || null,
+        capturedAt: capturedAt,
+        notes: e[EVIDENCE_FIELDS.notes] || null
+      }
+    })
+
+    return c.json({
+      job: transformedJob,
+      tasks: transformedTasks,
+      evidence: transformedEvidence
+    })
+  } catch (error) {
+    console.error('Error fetching pack data:', error)
+    return c.json({ error: 'Failed to fetch pack data' }, 500)
+  }
+})
+
 // Create new job
 jobs.post('/', async (c) => {
   const auth = getAuth(c)
@@ -322,16 +416,16 @@ jobs.post('/', async (c) => {
     }
 
     if (clientPhone) {
-  // Format as UK number for SmartSuite phone field
-  const formattedPhone = clientPhone.replace(/\s+/g, '')
-  if (formattedPhone.startsWith('0')) {
-    jobData[JOB_FIELDS.client_phone] = '+44' + formattedPhone.substring(1)
-  } else if (!formattedPhone.startsWith('+')) {
-    jobData[JOB_FIELDS.client_phone] = '+44' + formattedPhone
-  } else {
-    jobData[JOB_FIELDS.client_phone] = formattedPhone
-  }
-}
+      // Format as UK number for SmartSuite phone field
+      const formattedPhone = clientPhone.replace(/\s+/g, '')
+      if (formattedPhone.startsWith('0')) {
+        jobData[JOB_FIELDS.client_phone] = '+44' + formattedPhone.substring(1)
+      } else if (!formattedPhone.startsWith('+')) {
+        jobData[JOB_FIELDS.client_phone] = '+44' + formattedPhone
+      } else {
+        jobData[JOB_FIELDS.client_phone] = formattedPhone
+      }
+    }
     if (clientEmail) jobData[JOB_FIELDS.client_email] = clientEmail
     if (notes) jobData[JOB_FIELDS.notes] = notes
 
