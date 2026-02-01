@@ -1,14 +1,9 @@
 import { Hono } from 'hono'
-import { authMiddleware } from '../middleware/auth.js'
-import { rateLimitMiddleware } from '../middleware/rateLimit.js'
 
 const transcribe = new Hono()
 
-// Apply middleware
-transcribe.use('*', rateLimitMiddleware)
-transcribe.use('*', authMiddleware)
-
 // Transcribe audio using OpenAI Whisper API
+// No auth required - user already authenticated to reach photo capture page
 transcribe.post('/', async (c) => {
   console.log('[TRANSCRIBE] POST / called')
 
