@@ -204,6 +204,12 @@ export const evidenceApi = {
     longitude?: number | null
     gps_accuracy?: number | null
     captured_at: string
+    // Test results
+    test_voltage?: number | null
+    test_resistance?: number | null
+    test_rcd_trip_time?: number | null
+    test_continuity?: number | null
+    test_polarity?: string | null
   }, token?: string | null): Promise<ApiResponse<Evidence>> => {
     return apiRequest<Evidence>('/api/evidence', {
       method: 'POST',
@@ -234,6 +240,12 @@ export const evidenceApi = {
       latitude: number | null
       longitude: number | null
       accuracy: number | null
+      // Test results
+      testVoltage?: number | null
+      testResistance?: number | null
+      testRcdTripTime?: number | null
+      testContinuity?: number | null
+      testPolarity?: 'pass' | 'fail' | null
     },
     token?: string | null
   ): Promise<ApiResponse<Evidence>> => {
@@ -271,7 +283,7 @@ export const evidenceApi = {
         }
       }
       
-      // 5. Create evidence record with photo_stage and notes
+      // 5. Create evidence record with photo_stage, notes, and test results
       return evidenceApi.create({
         task_id: taskId,
         evidence_type: data.evidenceType,
@@ -283,6 +295,12 @@ export const evidenceApi = {
         longitude: data.longitude,
         gps_accuracy: data.accuracy,
         captured_at: data.capturedAt,
+        // Test results
+        test_voltage: data.testVoltage,
+        test_resistance: data.testResistance,
+        test_rcd_trip_time: data.testRcdTripTime,
+        test_continuity: data.testContinuity,
+        test_polarity: data.testPolarity,
       }, token)
     } catch (error) {
       captureError(error, 'evidenceApi.upload')
