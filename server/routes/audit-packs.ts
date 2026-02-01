@@ -207,11 +207,13 @@ auditPacks.post('/generate', strictRateLimitMiddleware, async (c) => {
       body.job + ':' + jobTitle + ':' + evidenceHashes + ':' + new Date().toISOString()
     )
 
-    // Create audit pack record with SmartSuite field IDs
+   // Create audit pack record with SmartSuite field IDs
+    // Title includes hash prefix for uniqueness and audit traceability
+    const generatedAt = new Date().toISOString()
     const packData: Record<string, unknown> = {
-      title: `Audit Pack - ${clientName || jobTitle} - ${new Date().toLocaleDateString('en-GB')}`,
+      title: `${clientName || jobTitle} - ${generatedAt.slice(0, 10)} [${packHash.slice(0, 8).toUpperCase()}]`,
       [AUDIT_PACK_FIELDS.job]: [body.job], // Linked records are arrays
-      [AUDIT_PACK_FIELDS.generated_at]: new Date().toISOString(),
+      [AUDIT_PACK_FIELDS.generated_at]: generatedAt,
       [AUDIT_PACK_FIELDS.evidence_count]: allEvidence.length,
       [AUDIT_PACK_FIELDS.hash]: packHash
     }
