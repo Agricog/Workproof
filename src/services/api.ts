@@ -144,10 +144,14 @@ export const tasksApi = {
     }, token)
   },
 
-  bulkCreate: async (jobId: string, taskTypes: string[], token?: string | null): Promise<ApiResponse<Task[]>> => {
+  bulkCreate: async (jobId: string, taskTypes: string[], token?: string | null, customTaskName?: string): Promise<ApiResponse<Task[]>> => {
     return apiRequest<Task[]>('/api/tasks/bulk', {
       method: 'POST',
-      body: JSON.stringify({ job_id: jobId, task_types: taskTypes }),
+      body: JSON.stringify({ 
+        job_id: jobId, 
+        task_types: taskTypes,
+        custom_task_name: customTaskName 
+      }),
     }, token)
   },
 
