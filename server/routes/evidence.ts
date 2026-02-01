@@ -254,16 +254,16 @@ function extractTaskIds(taskValue: unknown): string[] {
   return []
 }
 
-// Helper: Verify user owns the task (through job ownership)
-async function verifyTaskOwnership(taskId: string, clerkId: string): Promise<boolean> {
-  console.log('[EVIDENCE] verifyTaskOwnership called - taskId:', taskId, 'clerkId:', clerkId)
+// Helper: Verify user owns the task (through job ownership) and return job ID
+async function verifyTaskOwnershipAndGetJob(taskId: string, clerkId: string): Promise<{ isOwner: boolean; jobId: string | null }> {
+  console.log('[EVIDENCE] verifyTaskOwnershipAndGetJob called - taskId:', taskId, 'clerkId:', clerkId)
   
   const client = getSmartSuiteClient()
   const userRecordId = await getUserRecordId(clerkId)
   
   if (!userRecordId) {
     console.error('[EVIDENCE] Failed to get user record ID')
-    return false
+    return { isOwner: false, jobId: null }
   }
 
   try {
@@ -277,7 +277,7 @@ async function verifyTaskOwnership(taskId: string, clerkId: string): Promise<boo
 
     if (!jobId) {
       console.error('[EVIDENCE] Task has no job')
-      return false
+      return { isOwner: false, jobId: null }
     }
 
     // Get job to verify ownership
@@ -289,17 +289,53 @@ async function verifyTaskOwnership(taskId: string, clerkId: string): Promise<boo
     const jobUserIds = job[JOB_FIELDS.user] as string[] | string | undefined
     if (!jobUserIds) {
       console.error('[EVIDENCE] Job has no user')
-      return false
+      return { isOwner: false, jobId: null }
     }
     
     const userIds = Array.isArray(jobUserIds) ? jobUserIds : [jobUserIds]
     const isOwner = userIds.includes(userRecordId)
     
-    console.log('[EVIDENCE] Ownership check:', isOwner)
-    return isOwner
+    console.log('[EVIDENCE] Ownership check:', isOwner, 'jobId:', jobId)
+    return { isOwner, jobId: isOwner ? jobId : null }
   } catch (error) {
     console.error('[EVIDENCE] Error verifying ownership:', error)
-    return false
+    return { isOwner: false, jobId: null }
+  }
+}
+
+// Helper: Verify user owns the task (through job ownership) - simple version
+async function verifyTaskOwnership(taskId: string, clerkId: string): Promise<boolean> {
+  const result = await verifyTaskOwnershipAndGetJob(taskId, clerkId)
+  return result.isOwner
+}
+
+// Helper: Check if task has existing evidence and update Started At if first evidence
+async function updateTaskStartedAtIfFirst(taskId: string, client: ReturnType<typeof getSmartSuiteClient>): Promise<void> {
+  try {
+    // Get task to check if started_at is already set
+    const task = await withRetry(() => 
+      client.getRecord<Task>(TABLES.TASKS, taskId)
+    )
+    
+    const startedAt = task[TASK_FIELDS.started_at as keyof Task]
+    
+    // If started_at is already set, don't update
+    if (startedAt) {
+      console.log('[EVIDENCE] Task already has started_at, skipping update')
+      return
+    }
+    
+    // Set started_at to now
+    console.log('[EVIDENCE] Setting task started_at for first evidence upload')
+    await withRetry(() => 
+      client.updateRecord(TABLES.TASKS, taskId, {
+        [TASK_FIELDS.started_at]: new Date().toISOString()
+      } as Partial<Task>)
+    )
+    console.log('[EVIDENCE] Task started_at updated successfully')
+  } catch (error) {
+    // Don't fail the evidence creation if this fails
+    console.error('[EVIDENCE] Error updating task started_at:', error)
   }
 }
 
@@ -662,8 +698,8 @@ evidence.post('/', async (c) => {
       return c.json({ error: 'Missing required fields: task_id, evidence_type, photo_url' }, 400)
     }
 
-    // Verify ownership
-    const isOwner = await verifyTaskOwnership(taskId, auth.userId)
+    // Verify ownership and get job ID
+    const { isOwner, jobId } = await verifyTaskOwnershipAndGetJob(taskId, auth.userId)
     if (!isOwner) {
       console.error('[EVIDENCE] Ownership check failed')
       return c.json({ error: 'Forbidden' }, 403)
@@ -679,6 +715,12 @@ evidence.post('/', async (c) => {
       [EVIDENCE_FIELDS.captured_at]: (body.captured_at || body.capturedAt) as string || new Date().toISOString(),
       [EVIDENCE_FIELDS.synced_at]: new Date().toISOString(),
       [EVIDENCE_FIELDS.is_synced]: { checked: true }
+    }
+
+    // Add job link if we have job ID
+    if (jobId) {
+      evidenceData[EVIDENCE_FIELDS.job] = [jobId]
+      console.log('[EVIDENCE] Linking evidence to job:', jobId)
     }
 
     // Add photo_stage if provided
@@ -708,6 +750,9 @@ evidence.post('/', async (c) => {
     const newEvidence = await withRetry(() => 
       client.createRecord<Evidence>(TABLES.EVIDENCE, evidenceData as Partial<Evidence>)
     )
+
+    // Update task started_at if this is the first evidence
+    await updateTaskStartedAtIfFirst(taskId, client)
 
     const transformed = transformEvidence(newEvidence as unknown as Record<string, unknown>)
     
