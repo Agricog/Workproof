@@ -210,6 +210,9 @@ export const evidenceApi = {
     test_rcd_trip_time?: number | null
     test_continuity?: number | null
     test_polarity?: string | null
+    // Voice note
+    audio_url?: string | null
+    audio_transcript?: string | null
   }, token?: string | null): Promise<ApiResponse<Evidence>> => {
     return apiRequest<Evidence>('/api/evidence', {
       method: 'POST',
@@ -246,6 +249,9 @@ export const evidenceApi = {
       testRcdTripTime?: number | null
       testContinuity?: number | null
       testPolarity?: 'pass' | 'fail' | null
+      // Voice note
+      audioData?: string | null
+      audioTranscript?: string | null
     },
     token?: string | null
   ): Promise<ApiResponse<Evidence>> => {
@@ -283,7 +289,27 @@ export const evidenceApi = {
         }
       }
       
-      // 5. Create evidence record with photo_stage, notes, and test results
+      // 5. Upload audio to R2 if present
+      let audioUrl: string | undefined
+      if (data.audioData) {
+        const audioBlob = base64ToBlob(data.audioData, 'audio/webm')
+        const audioFilename = `${Date.now()}-audio.webm`
+        const audioUrlResult = await evidenceApi.getUploadUrl(audioFilename, 'audio/webm', token)
+        
+        if (audioUrlResult.data) {
+          const audioUploadResponse = await fetch(audioUrlResult.data.upload_url, {
+            method: 'PUT',
+            body: audioBlob,
+            headers: { 'Content-Type': 'audio/webm' },
+          })
+          
+          if (audioUploadResponse.ok) {
+            audioUrl = audioUrlResult.data.photo_url
+          }
+        }
+      }
+      
+      // 6. Create evidence record with photo_stage, notes, test results, and audio
       return evidenceApi.create({
         task_id: taskId,
         evidence_type: data.evidenceType,
@@ -301,6 +327,9 @@ export const evidenceApi = {
         test_rcd_trip_time: data.testRcdTripTime,
         test_continuity: data.testContinuity,
         test_polarity: data.testPolarity,
+        // Voice note
+        audio_url: audioUrl,
+        audio_transcript: data.audioTranscript,
       }, token)
     } catch (error) {
       captureError(error, 'evidenceApi.upload')
