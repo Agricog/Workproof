@@ -788,9 +788,16 @@ tasks.put('/:id', async (c) => {
     const updateData: Record<string, unknown> = {}
 
     if (body.status !== undefined) {
+      const statusStr = body.status as string
       // Convert status string to option ID
-      const statusOptionId = TASK_STATUS_TO_OPTION_ID[body.status as string]
+      const statusOptionId = TASK_STATUS_TO_OPTION_ID[statusStr]
       updateData[TASK_FIELDS.status] = statusOptionId || body.status
+      
+      // Auto-set completed_at when status changes to completed
+      if (statusStr === 'completed') {
+        updateData[TASK_FIELDS.completed_at] = new Date().toISOString()
+        console.log('[TASKS] Auto-setting completed_at for status change to completed')
+      }
     }
     if (body.notes !== undefined) {
       updateData[TASK_FIELDS.notes] = body.notes
