@@ -792,7 +792,8 @@ evidence.post('/', async (c) => {
     }
     if (audioTranscript !== undefined && audioTranscript !== null) {
       evidenceData[EVIDENCE_FIELDS.audio_transcript] = audioTranscript
-      console.log('[EVIDENCE] Adding audio transcript:', audioTranscript.slice(0, 50) + (audioTranscript.length > 50 ? '...' : ''))
+      const transcriptStr = String(audioTranscript)
+      console.log('[EVIDENCE] Adding audio transcript:', transcriptStr.slice(0, 50) + (transcriptStr.length > 50 ? '...' : ''))
     }
 
     console.log('[EVIDENCE] Creating record with data:', JSON.stringify(evidenceData, null, 2))
