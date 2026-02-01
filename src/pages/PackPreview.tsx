@@ -1,7 +1,7 @@
 /**
  * WorkProof Pack Preview
  * View evidence before export with client-side PDF generation including photos and QR verification
- * Uses free QR API (no npm package needed) for verification codes
+ * Uses single API call for all data (job, tasks, evidence) to prevent token expiration
  */
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -20,26 +20,38 @@ import {
 } from 'lucide-react'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 import { trackPageView, trackError } from '../utils/analytics'
-import { jobsApi, tasksApi, evidenceApi, auditPackApi } from '../services/api'
+import { auditPackApi } from '../services/api'
 import { captureError } from '../utils/errorTracking'
 import { getTaskTypeConfig } from '../types/taskConfigs'
 import type { Job, Task, TaskType } from '../types/models'
 
-// Extended evidence interface with all fields we need
+// Evidence interface matching server response
 interface EvidenceItem {
   id: string
   taskId: string
   evidenceType: string
-  photoStage?: string
+  photoStage?: string | null
   photoUrl: string | null
-  photoHash?: string
-  latitude?: string | number
-  longitude?: string | number
-  gpsAccuracy?: string | number
-  capturedAt?: string | { date: string }
-  syncedAt?: string | { date: string }
-  isSynced?: boolean
-  notes?: string
+  photoHash?: string | null
+  latitude?: number | null
+  longitude?: number | null
+  gpsAccuracy?: number | null
+  capturedAt?: string | null
+  notes?: string | null
+}
+
+// API response interface
+interface PackDataResponse {
+  job: Job & { taskCount: number; evidenceCount: number }
+  tasks: Array<{
+    id: string
+    jobId: string
+    taskType: string
+    status: string
+    notes: string
+    order: number
+  }>
+  evidence: EvidenceItem[]
 }
 
 export default function PackPreview() {
@@ -70,63 +82,43 @@ export default function PackPreview() {
     
     try {
       const token = await getToken()
+      const API_BASE = import.meta.env.VITE_API_URL || ''
       
-      // Load job
-      const jobResponse = await jobsApi.get(jobId, token)
-      if (jobResponse.error || !jobResponse.data) {
-        throw new Error(jobResponse.error || 'Failed to load job')
-      }
-      setJob(jobResponse.data)
+      // Single API call for all data - prevents token expiration issues
+      const response = await fetch(`${API_BASE}/api/jobs/${jobId}/pack-data`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include'
+      })
       
-      // Load tasks
-      const tasksResponse = await tasksApi.listByJob(jobId, token)
-      if (tasksResponse.data) {
-        const taskItems = Array.isArray(tasksResponse.data) 
-          ? tasksResponse.data 
-          : (tasksResponse.data as { items?: Task[] }).items || []
-        setTasks(taskItems)
-        
-        // Load evidence for all tasks
-        const allEvidence: EvidenceItem[] = []
-        for (const task of taskItems) {
-          const evidenceResponse = await evidenceApi.listByTask(task.id, token)
-          if (evidenceResponse.data) {
-            const evidenceItems = Array.isArray(evidenceResponse.data)
-              ? evidenceResponse.data
-              : (evidenceResponse.data as { items?: EvidenceItem[] }).items || []
-            // Map to our interface
-            evidenceItems.forEach((item: unknown) => {
-              const evidenceItem = item as EvidenceItem
-              allEvidence.push({
-                id: evidenceItem.id,
-                taskId: evidenceItem.taskId,
-                evidenceType: evidenceItem.evidenceType,
-                photoStage: evidenceItem.photoStage,
-                photoUrl: evidenceItem.photoUrl,
-                photoHash: evidenceItem.photoHash,
-                latitude: evidenceItem.latitude,
-                longitude: evidenceItem.longitude,
-                gpsAccuracy: evidenceItem.gpsAccuracy,
-                capturedAt: evidenceItem.capturedAt,
-                syncedAt: evidenceItem.syncedAt,
-                isSynced: evidenceItem.isSynced,
-                notes: evidenceItem.notes
-              })
-            })
-          }
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Session expired. Please refresh the page.')
         }
-        setEvidence(allEvidence)
+        if (response.status === 403) {
+          throw new Error('You do not have permission to view this job.')
+        }
+        throw new Error('Failed to load pack data')
       }
+      
+      const data: PackDataResponse = await response.json()
+      
+      setJob(data.job)
+      setTasks(data.tasks as unknown as Task[])
+      setEvidence(data.evidence)
+      
     } catch (err) {
       captureError(err, 'PackPreview.loadPackData')
       trackError('pack_load_error', err instanceof Error ? err.message : 'Unknown error')
-      setError('Failed to load pack data. Please try again.')
+      setError(err instanceof Error ? err.message : 'Failed to load pack data. Please try again.')
     } finally {
       setIsLoading(false)
     }
   }
 
-  const formatDate = (dateField: string | { date: string } | undefined): string => {
+  const formatDate = (dateField: string | { date: string } | null | undefined): string => {
     if (!dateField) return 'N/A'
     const dateStr = typeof dateField === 'object' ? dateField.date : dateField
     const d = new Date(dateStr)
@@ -139,7 +131,7 @@ export default function PackPreview() {
     })
   }
 
-  const formatShortDate = (dateField: string | { date: string } | undefined): string => {
+  const formatShortDate = (dateField: string | { date: string } | null | undefined): string => {
     if (!dateField) return 'N/A'
     const dateStr = typeof dateField === 'object' ? dateField.date : dateField
     const d = new Date(dateStr)
@@ -150,19 +142,12 @@ export default function PackPreview() {
     })
   }
 
-  // Convert latitude/longitude to string safely
-  const toCoordString = (coord: string | number | undefined): string | undefined => {
-    if (coord === undefined || coord === null) return undefined
-    return String(coord)
-  }
-
   // Fetch image via server proxy to avoid CORS
   const fetchImageBytes = async (url: string): Promise<Uint8Array | null> => {
     try {
       const token = await getToken()
       const API_BASE = import.meta.env.VITE_API_URL || ''
       
-      // Use server proxy to fetch image (avoids CORS)
       const proxyUrl = `${API_BASE}/api/images/proxy?url=${encodeURIComponent(url)}`
       
       const response = await fetch(proxyUrl, {
@@ -183,7 +168,6 @@ export default function PackPreview() {
   // Fetch QR code from free API - no npm package needed
   const fetchQRCodeBytes = async (url: string): Promise<Uint8Array | null> => {
     try {
-      // Use free QR API (no auth required, CORS-friendly)
       const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&format=png&data=${encodeURIComponent(url)}`
       
       const response = await fetch(qrApiUrl)
@@ -231,11 +215,10 @@ export default function PackPreview() {
       const width = 595
       const height = 842
       
-      // Client info - safely access job properties
+      // Client info
       const clientName = job.clientName || 'Unknown Client'
       const address = job.address || ''
       const postcode = job.postcode || ''
-      // Access jobType and jobTypeDescription safely via type assertion
       const jobData = job as Job & { jobType?: string; jobTypeDescription?: string }
       const jobType = jobData.jobType || 'Electrical Work'
       const jobTypeDescription = jobData.jobTypeDescription || ''
@@ -507,9 +490,9 @@ export default function PackPreview() {
         const evidenceType = (item.evidenceType || 'unknown').replace(/_/g, ' ')
         const stage = item.photoStage ? item.photoStage.charAt(0).toUpperCase() + item.photoStage.slice(1) : '-'
         const capturedAt = formatShortDate(item.capturedAt)
-        const lat = toCoordString(item.latitude)
-        const lng = toCoordString(item.longitude)
-        const gps = lat && lng ? `${parseFloat(lat).toFixed(4)}, ${parseFloat(lng).toFixed(4)}` : 'N/A'
+        const lat = item.latitude
+        const lng = item.longitude
+        const gps = lat && lng ? `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'N/A'
         const hash = item.photoHash ? item.photoHash.substring(0, 12) + '...' : 'N/A'
         
         page.drawText((index + 1).toString(), { x: 50, y: yPos - 10, size: 8, font: font, color: rgb(0.4, 0.4, 0.4) })
@@ -632,9 +615,7 @@ export default function PackPreview() {
           })
           
           // GPS
-          const itemLat = toCoordString(item.latitude)
-          const itemLng = toCoordString(item.longitude)
-          if (itemLat && itemLng) {
+          if (item.latitude && item.longitude) {
             page.drawText('GPS:', {
               x: 50,
               y: metaY - 18,
@@ -642,7 +623,7 @@ export default function PackPreview() {
               font: font,
               color: rgb(0.5, 0.5, 0.5)
             })
-            page.drawText(`${parseFloat(itemLat).toFixed(6)}, ${parseFloat(itemLng).toFixed(6)}`, {
+            page.drawText(`${item.latitude.toFixed(6)}, ${item.longitude.toFixed(6)}`, {
               x: 110,
               y: metaY - 18,
               size: 9,
@@ -717,7 +698,6 @@ export default function PackPreview() {
           
         } catch (err) {
           console.error('Failed to embed image:', err)
-          // Continue with other images
         }
       }
       
@@ -987,7 +967,7 @@ export default function PackPreview() {
                 {selectedImage.latitude && selectedImage.longitude && (
                   <div>
                     <p className="text-gray-500">GPS</p>
-                    <p>{parseFloat(String(selectedImage.latitude)).toFixed(6)}, {parseFloat(String(selectedImage.longitude)).toFixed(6)}</p>
+                    <p>{selectedImage.latitude.toFixed(6)}, {selectedImage.longitude.toFixed(6)}</p>
                   </div>
                 )}
                 {selectedImage.gpsAccuracy && (
