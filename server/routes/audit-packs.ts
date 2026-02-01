@@ -214,10 +214,11 @@ auditPacks.post('/generate', strictRateLimitMiddleware, async (c) => {
     const packHash = await generatePackHash(allEvidence as unknown as Record<string, unknown>[])
 
     // Create audit pack record with SmartSuite field IDs
-    // Title includes hash prefix for uniqueness and audit traceability
+    // Title includes date+time+seconds for uniqueness, hash prefix for audit traceability
     const generatedAt = new Date().toISOString()
+    const dateTime = generatedAt.slice(0, 19).replace('T', ' ') // "2026-02-01 15:33:45"
     const packData: Record<string, unknown> = {
-      title: `${clientName || jobTitle} - ${generatedAt.slice(0, 10)} [${packHash.slice(0, 8).toUpperCase()}]`,
+      title: `${clientName || jobTitle} - ${dateTime} [${packHash.slice(0, 8).toUpperCase()}]`,
       [AUDIT_PACK_FIELDS.job]: [body.job], // Linked records are arrays
       [AUDIT_PACK_FIELDS.generated_at]: generatedAt,
       [AUDIT_PACK_FIELDS.evidence_count]: allEvidence.length,
@@ -414,6 +415,46 @@ auditPacks.post('/:id/share', strictRateLimitMiddleware, async (c) => {
       return c.json({ error: 'Forbidden' }, 403)
     }
 
+    // Get job details for email
+    const job = await client.getRecord<Job>(TABLES.JOBS, jobId)
+    const clientName = (job[JOB_FIELDS.client_name as keyof Job] as string) || 'Valued Customer'
+    const jobAddress = (job[JOB_FIELDS.address as keyof Job] as string) || ''
+    const postcode = (job[JOB_FIELDS.postcode as keyof Job] as string) || ''
+    const fullAddress = postcode ? `${jobAddress}, ${postcode}` : jobAddress
+
+    // Get user details for email signature
+    const userRecordId = await getUserRecordId(auth.userId)
+    let electricianName = 'Your Electrician'
+    let electricianCompany: string | undefined
+    let electricianEmail: string | undefined
+
+    if (userRecordId) {
+      const user = await client.getRecord<User>(TABLES.USERS, userRecordId)
+      electricianName = (user[USER_FIELDS.full_name as keyof User] as string) || electricianName
+      electricianCompany = user[USER_FIELDS.company_name as keyof User] as string | undefined
+      electricianEmail = user[USER_FIELDS.email as keyof User] as string | undefined
+    }
+
+    // Send email
+    const { sendAuditPackEmail } = await import('../lib/email.js')
+    const verifyUrl = `https://workproof.co.uk/verify/${packId}`
+    
+    const emailResult = await sendAuditPackEmail({
+      to: body.email,
+      clientName,
+      jobAddress: fullAddress,
+      electricianName,
+      electricianCompany,
+      verifyUrl,
+      packId,
+      replyTo: electricianEmail
+    })
+
+    if (!emailResult.success) {
+      console.error('[Share] Email failed:', emailResult.error)
+      return c.json({ error: 'Failed to send email. Please try again.' }, 500)
+    }
+
     // Update shared_with field
     const updateData: Record<string, unknown> = {
       [AUDIT_PACK_FIELDS.shared_with]: body.email
@@ -425,12 +466,11 @@ auditPacks.post('/:id/share', strictRateLimitMiddleware, async (c) => {
       updateData as Partial<AuditPack>
     )
 
-    // TODO: Send email via Resend
-    // For now, just return success - email integration comes later
+    console.log('[Share] Audit pack shared:', packId, '→', body.email)
 
     return c.json({ 
       success: true,
-      message: 'Audit pack will be shared with ' + body.email
+      message: `Audit pack sent to ${body.email}`
     })
   } catch (error) {
     console.error('Error sharing audit pack:', error)
