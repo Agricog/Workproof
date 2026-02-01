@@ -118,7 +118,9 @@ auditPacks.get('/job/:jobId', async (c) => {
       pdf_url: pack[AUDIT_PACK_FIELDS.pdf_url as keyof AuditPack],
       evidence_count: pack[AUDIT_PACK_FIELDS.evidence_count as keyof AuditPack],
       hash: pack[AUDIT_PACK_FIELDS.hash as keyof AuditPack],
-      downloaded_at: pack[AUDIT_PACK_FIELDS.downloaded_at as keyof AuditPack]
+      downloaded_at: pack[AUDIT_PACK_FIELDS.downloaded_at as keyof AuditPack],
+      signature_url: pack[AUDIT_PACK_FIELDS.signature_url as keyof AuditPack],
+      signed_at: pack[AUDIT_PACK_FIELDS.signed_at as keyof AuditPack]
     }))
 
     return c.json({
@@ -160,7 +162,9 @@ auditPacks.get('/:id', async (c) => {
       evidence_count: pack[AUDIT_PACK_FIELDS.evidence_count as keyof AuditPack],
       hash: pack[AUDIT_PACK_FIELDS.hash as keyof AuditPack],
       downloaded_at: pack[AUDIT_PACK_FIELDS.downloaded_at as keyof AuditPack],
-      shared_with: pack[AUDIT_PACK_FIELDS.shared_with as keyof AuditPack]
+      shared_with: pack[AUDIT_PACK_FIELDS.shared_with as keyof AuditPack],
+      signature_url: pack[AUDIT_PACK_FIELDS.signature_url as keyof AuditPack],
+      signed_at: pack[AUDIT_PACK_FIELDS.signed_at as keyof AuditPack]
     })
   } catch (error) {
     console.error('Error fetching audit pack:', error)
@@ -316,7 +320,9 @@ auditPacks.get('/:id/full', async (c) => {
         job: jobId,
         generated_at: pack[AUDIT_PACK_FIELDS.generated_at as keyof AuditPack],
         evidence_count: pack[AUDIT_PACK_FIELDS.evidence_count as keyof AuditPack],
-        hash: pack[AUDIT_PACK_FIELDS.hash as keyof AuditPack]
+        hash: pack[AUDIT_PACK_FIELDS.hash as keyof AuditPack],
+        signature_url: pack[AUDIT_PACK_FIELDS.signature_url as keyof AuditPack],
+        signed_at: pack[AUDIT_PACK_FIELDS.signed_at as keyof AuditPack]
       },
       job: {
         id: job.id,
@@ -379,6 +385,57 @@ auditPacks.post('/:id/downloaded', async (c) => {
   } catch (error) {
     console.error('Error updating audit pack:', error)
     return c.json({ error: 'Failed to update audit pack' }, 500)
+  }
+})
+
+// Save client signature to audit pack
+auditPacks.put('/:id/signature', async (c) => {
+  const auth = getAuth(c)
+  const packId = c.req.param('id')
+  const client = getSmartSuiteClient()
+
+  try {
+    const body = await c.req.json() as { signature_url: string }
+    
+    if (!body.signature_url) {
+      return c.json({ error: 'Missing required field: signature_url' }, 400)
+    }
+
+    const pack = await client.getRecord<AuditPack>(TABLES.AUDIT_PACKS, packId)
+    
+    // Get job ID from linked field
+    const jobId = extractJobId(pack[AUDIT_PACK_FIELDS.job as keyof AuditPack])
+    if (!jobId) {
+      return c.json({ error: 'Invalid audit pack' }, 400)
+    }
+
+    // Verify ownership
+    const isOwner = await verifyJobOwnership(jobId, auth.userId)
+    if (!isOwner) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
+
+    const updateData: Record<string, unknown> = {
+      [AUDIT_PACK_FIELDS.signature_url]: body.signature_url,
+      [AUDIT_PACK_FIELDS.signed_at]: new Date().toISOString()
+    }
+
+    const updatedPack = await client.updateRecord<AuditPack>(
+      TABLES.AUDIT_PACKS,
+      packId,
+      updateData as Partial<AuditPack>
+    )
+
+    console.log('[Signature] Audit pack signed:', packId)
+
+    return c.json({
+      id: updatedPack.id,
+      signature_url: updatedPack[AUDIT_PACK_FIELDS.signature_url as keyof AuditPack],
+      signed_at: updatedPack[AUDIT_PACK_FIELDS.signed_at as keyof AuditPack]
+    })
+  } catch (error) {
+    console.error('Error saving signature:', error)
+    return c.json({ error: 'Failed to save signature' }, 500)
   }
 })
 
