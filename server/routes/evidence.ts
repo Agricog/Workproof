@@ -68,7 +68,7 @@ const EVIDENCE_TYPE_OPTIONS: Record<string, string> = {
   'uR5fB': 'test_meter_readings',
   'yoJ7D': 'test_result',
   '1VlrY': 'certificate_photo',
-  'c7LhE': 'labelling',
+  'c7LhE': 'label_applied',
   'X3Lrf': 'test_instrument_calibration',
   'qytQX': 'earthing_arrangement',
   'f2QeD': 'wiring_photo',
