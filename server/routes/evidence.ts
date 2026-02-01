@@ -428,6 +428,9 @@ function transformEvidence(item: Record<string, unknown>): Record<string, unknow
     testRcdTripTime: item[EVIDENCE_FIELDS.test_rcd_trip_time] || null,
     testContinuity: item[EVIDENCE_FIELDS.test_continuity] || null,
     testPolarity: item[EVIDENCE_FIELDS.test_polarity] || null,
+    // Voice note
+    audioUrl: item[EVIDENCE_FIELDS.audio_url] || null,
+    audioTranscript: item[EVIDENCE_FIELDS.audio_transcript] || null,
   }
 }
 
@@ -777,6 +780,19 @@ evidence.post('/', async (c) => {
     if (testPolarity !== undefined && testPolarity !== null) {
       evidenceData[EVIDENCE_FIELDS.test_polarity] = testPolarity
       console.log('[EVIDENCE] Adding test polarity:', testPolarity)
+    }
+
+    // Add audio fields if provided
+    const audioUrl = body.audio_url ?? body.audioUrl
+    const audioTranscript = body.audio_transcript ?? body.audioTranscript
+
+    if (audioUrl !== undefined && audioUrl !== null) {
+      evidenceData[EVIDENCE_FIELDS.audio_url] = audioUrl
+      console.log('[EVIDENCE] Adding audio URL')
+    }
+    if (audioTranscript !== undefined && audioTranscript !== null) {
+      evidenceData[EVIDENCE_FIELDS.audio_transcript] = audioTranscript
+      console.log('[EVIDENCE] Adding audio transcript:', audioTranscript.slice(0, 50) + (audioTranscript.length > 50 ? '...' : ''))
     }
 
     console.log('[EVIDENCE] Creating record with data:', JSON.stringify(evidenceData, null, 2))
