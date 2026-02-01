@@ -1,6 +1,6 @@
 /**
  * WorkProof Pack Preview
- * View evidence before export with client-side PDF generation including photos
+ * View evidence before export with client-side PDF generation including photos and QR verification
  */
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -16,9 +16,11 @@ import {
   Camera,
   X,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  QrCode
 } from 'lucide-react'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
+import QRCode from 'qrcode'
 import { trackPageView, trackError } from '../utils/analytics'
 import { jobsApi, tasksApi, evidenceApi, auditPackApi } from '../services/api'
 import { captureError } from '../utils/errorTracking'
@@ -30,6 +32,7 @@ interface EvidenceItem {
   id: string
   taskId: string
   evidenceType: string
+  photoStage?: string
   photoUrl: string | null
   photoHash?: string
   latitude?: string
@@ -38,6 +41,7 @@ interface EvidenceItem {
   capturedAt?: string | { date: string }
   syncedAt?: string | { date: string }
   isSynced?: boolean
+  notes?: string
 }
 
 export default function PackPreview() {
@@ -99,6 +103,7 @@ export default function PackPreview() {
                 id: item.id as string,
                 taskId: task.id,
                 evidenceType: (item.evidenceType as string) || 'unknown',
+                photoStage: item.photoStage as string | undefined,
                 photoUrl: item.photoUrl as string | null,
                 photoHash: item.photoHash as string | undefined,
                 latitude: item.latitude as string | undefined,
@@ -106,7 +111,8 @@ export default function PackPreview() {
                 gpsAccuracy: item.gpsAccuracy as string | undefined,
                 capturedAt: item.capturedAt as string | { date: string } | undefined,
                 syncedAt: item.syncedAt as string | { date: string } | undefined,
-                isSynced: item.isSynced as boolean | undefined
+                isSynced: item.isSynced as boolean | undefined,
+                notes: item.notes as string | undefined
               })
             })
           }
@@ -171,6 +177,23 @@ export default function PackPreview() {
     }
   }
 
+  // Generate QR code as PNG data URL
+  const generateQRCode = async (url: string): Promise<string> => {
+    try {
+      return await QRCode.toDataURL(url, {
+        width: 120,
+        margin: 1,
+        color: {
+          dark: '#1a1a1a',
+          light: '#ffffff'
+        }
+      })
+    } catch (err) {
+      console.error('Failed to generate QR code:', err)
+      return ''
+    }
+  }
+
   const generatePDF = async () => {
     if (!job || !jobId) return
     
@@ -190,6 +213,11 @@ export default function PackPreview() {
       
       auditPackId = auditPackResponse.data.id
       const packHash = auditPackResponse.data.hash
+      
+      // Generate verification URL and QR code
+      const verifyUrl = `https://workproof.co.uk/verify/${auditPackId}`
+      setGeneratingStatus('Generating verification QR code...')
+      const qrCodeDataUrl = await generateQRCode(verifyUrl)
       
       setGeneratingStatus('Creating document...')
       
@@ -227,12 +255,37 @@ export default function PackPreview() {
         color: rgb(0.133, 0.545, 0.133)
       })
       
+      // QR Code in top right corner
+      if (qrCodeDataUrl) {
+        try {
+          const qrImageBytes = await fetch(qrCodeDataUrl).then(res => res.arrayBuffer())
+          const qrImage = await pdfDoc.embedPng(new Uint8Array(qrImageBytes))
+          
+          page.drawImage(qrImage, {
+            x: width - 140,
+            y: height - 170,
+            width: 90,
+            height: 90
+          })
+          
+          page.drawText('Scan to Verify', {
+            x: width - 135,
+            y: height - 185,
+            size: 8,
+            font: font,
+            color: rgb(0.5, 0.5, 0.5)
+          })
+        } catch (err) {
+          console.error('Failed to embed QR code:', err)
+        }
+      }
+      
       // Job details box
       const boxY = height - 150
       page.drawRectangle({
         x: 40,
         y: boxY - 130,
-        width: width - 80,
+        width: width - 180,
         height: 130,
         borderColor: rgb(0.85, 0.85, 0.85),
         borderWidth: 1,
@@ -273,18 +326,18 @@ export default function PackPreview() {
         color: rgb(0.2, 0.2, 0.2)
       })
       
-      // Date
+      // Date and postcode
       page.drawText('Completion Date:', {
-        x: 380,
-        y: boxY - 25,
+        x: 55,
+        y: boxY - 115,
         size: 10,
         font: font,
         color: rgb(0.5, 0.5, 0.5)
       })
       page.drawText(formatShortDate(job.startDate), {
-        x: 380,
-        y: boxY - 45,
-        size: 12,
+        x: 150,
+        y: boxY - 115,
+        size: 10,
         font: font,
         color: rgb(0.2, 0.2, 0.2)
       })
@@ -411,18 +464,54 @@ export default function PackPreview() {
         })
       })
       
+      // Verification box at bottom
+      const verifyBoxY = 140
+      page.drawRectangle({
+        x: 40,
+        y: verifyBoxY - 80,
+        width: width - 80,
+        height: 80,
+        color: rgb(0.95, 0.98, 0.95),
+        borderColor: rgb(0.133, 0.545, 0.133),
+        borderWidth: 1
+      })
+      
+      page.drawText('CRYPTOGRAPHICALLY VERIFIED', {
+        x: 55,
+        y: verifyBoxY - 25,
+        size: 12,
+        font: fontBold,
+        color: rgb(0.133, 0.545, 0.133)
+      })
+      
+      page.drawText('This audit pack can be independently verified at:', {
+        x: 55,
+        y: verifyBoxY - 45,
+        size: 9,
+        font: font,
+        color: rgb(0.4, 0.4, 0.4)
+      })
+      
+      page.drawText(verifyUrl, {
+        x: 55,
+        y: verifyBoxY - 60,
+        size: 9,
+        font: fontBold,
+        color: rgb(0.2, 0.4, 0.8)
+      })
+      
       // Pack hash at bottom of cover page
       page.drawText('Pack Hash (SHA-256):', {
-        x: 50,
-        y: 80,
-        size: 9,
+        x: 350,
+        y: verifyBoxY - 45,
+        size: 8,
         font: font,
         color: rgb(0.5, 0.5, 0.5)
       })
-      page.drawText(packHash, {
-        x: 50,
-        y: 65,
-        size: 7,
+      page.drawText(packHash.substring(0, 32) + '...', {
+        x: 350,
+        y: verifyBoxY - 58,
+        size: 6,
         font: font,
         color: rgb(0.4, 0.4, 0.4)
       })
@@ -460,8 +549,9 @@ export default function PackPreview() {
       
       page.drawText('#', { x: 50, y: yPos - 14, size: 9, font: fontBold, color: rgb(0.3, 0.3, 0.3) })
       page.drawText('Evidence Type', { x: 70, y: yPos - 14, size: 9, font: fontBold, color: rgb(0.3, 0.3, 0.3) })
-      page.drawText('Captured', { x: 200, y: yPos - 14, size: 9, font: fontBold, color: rgb(0.3, 0.3, 0.3) })
-      page.drawText('GPS Coordinates', { x: 320, y: yPos - 14, size: 9, font: fontBold, color: rgb(0.3, 0.3, 0.3) })
+      page.drawText('Stage', { x: 180, y: yPos - 14, size: 9, font: fontBold, color: rgb(0.3, 0.3, 0.3) })
+      page.drawText('Captured', { x: 230, y: yPos - 14, size: 9, font: fontBold, color: rgb(0.3, 0.3, 0.3) })
+      page.drawText('GPS', { x: 330, y: yPos - 14, size: 9, font: fontBold, color: rgb(0.3, 0.3, 0.3) })
       page.drawText('Hash (SHA-256)', { x: 440, y: yPos - 14, size: 9, font: fontBold, color: rgb(0.3, 0.3, 0.3) })
       
       yPos -= 30
@@ -484,17 +574,19 @@ export default function PackPreview() {
         }
         
         const evidenceType = (item.evidenceType || 'unknown').replace(/_/g, ' ')
+        const stage = item.photoStage ? item.photoStage.charAt(0).toUpperCase() + item.photoStage.slice(1) : '-'
         const capturedAt = formatShortDate(item.capturedAt)
         const lat = item.latitude
         const lng = item.longitude
         const gps = lat && lng ? `${parseFloat(lat).toFixed(4)}, ${parseFloat(lng).toFixed(4)}` : 'N/A'
-        const hash = (item.photoHash || '').substring(0, 16) + '...'
+        const hash = (item.photoHash || '').substring(0, 12) + '...'
         
         page.drawText(`${index + 1}`, { x: 50, y: yPos - 10, size: 9, font: font, color: rgb(0.4, 0.4, 0.4) })
-        page.drawText(evidenceType.substring(0, 18), { x: 70, y: yPos - 10, size: 9, font: font, color: rgb(0.2, 0.2, 0.2) })
-        page.drawText(capturedAt, { x: 200, y: yPos - 10, size: 8, font: font, color: rgb(0.4, 0.4, 0.4) })
-        page.drawText(gps, { x: 320, y: yPos - 10, size: 8, font: font, color: rgb(0.4, 0.4, 0.4) })
-        page.drawText(hash, { x: 440, y: yPos - 10, size: 7, font: font, color: rgb(0.5, 0.5, 0.5) })
+        page.drawText(evidenceType.substring(0, 15), { x: 70, y: yPos - 10, size: 8, font: font, color: rgb(0.2, 0.2, 0.2) })
+        page.drawText(stage, { x: 180, y: yPos - 10, size: 8, font: font, color: rgb(0.4, 0.4, 0.4) })
+        page.drawText(capturedAt, { x: 230, y: yPos - 10, size: 7, font: font, color: rgb(0.4, 0.4, 0.4) })
+        page.drawText(gps, { x: 330, y: yPos - 10, size: 7, font: font, color: rgb(0.4, 0.4, 0.4) })
+        page.drawText(hash, { x: 440, y: yPos - 10, size: 6, font: font, color: rgb(0.5, 0.5, 0.5) })
         
         yPos -= 22
       })
@@ -514,6 +606,14 @@ export default function PackPreview() {
         size: 9,
         font: font,
         color: rgb(0.5, 0.5, 0.5)
+      })
+      
+      page.drawText(`Verify: ${verifyUrl}`, {
+        x: 350,
+        y: yPos - 20,
+        size: 8,
+        font: font,
+        color: rgb(0.2, 0.4, 0.8)
       })
       
       // Photo pages - one photo per page
@@ -574,9 +674,34 @@ export default function PackPreview() {
             color: rgb(0.1, 0.1, 0.1)
           })
           
+          // Photo stage badge
+          if (item.photoStage) {
+            const stageColors: Record<string, { r: number; g: number; b: number }> = {
+              before: { r: 0.92, g: 0.85, b: 0.65 },
+              during: { r: 0.65, g: 0.85, b: 0.92 },
+              after: { r: 0.65, g: 0.92, b: 0.70 }
+            }
+            const stageColor = stageColors[item.photoStage] || stageColors.before
+            
+            page.drawRectangle({
+              x: 200,
+              y: height - 68,
+              width: 60,
+              height: 18,
+              color: rgb(stageColor.r, stageColor.g, stageColor.b)
+            })
+            page.drawText(item.photoStage.toUpperCase(), {
+              x: 210,
+              y: height - 62,
+              size: 8,
+              font: fontBold,
+              color: rgb(0.3, 0.3, 0.3)
+            })
+          }
+          
           // Calculate image dimensions to fit on page
           const maxWidth = width - 100
-          const maxHeight = 500
+          const maxHeight = 480
           const imgWidth = embeddedImage.width
           const imgHeight = embeddedImage.height
           
@@ -653,7 +778,7 @@ export default function PackPreview() {
             })
             
             if (item.gpsAccuracy) {
-              page.drawText(`(accuracy: ${item.gpsAccuracy}m)`, {
+              page.drawText(`(±${item.gpsAccuracy}m)`, {
                 x: 280,
                 y: metaY - 18,
                 size: 8,
@@ -663,19 +788,37 @@ export default function PackPreview() {
             }
           }
           
-          // SHA-256 Hash
-          if (item.photoHash) {
-            page.drawText('SHA-256:', {
+          // Notes if present
+          if (item.notes) {
+            page.drawText('Notes:', {
               x: 50,
               y: metaY - 36,
               size: 9,
               font: font,
               color: rgb(0.5, 0.5, 0.5)
             })
-            page.drawText(item.photoHash, {
+            page.drawText(item.notes.substring(0, 80) + (item.notes.length > 80 ? '...' : ''), {
               x: 110,
               y: metaY - 36,
-              size: 7,
+              size: 9,
+              font: font,
+              color: rgb(0.2, 0.2, 0.2)
+            })
+          }
+          
+          // SHA-256 Hash
+          if (item.photoHash) {
+            page.drawText('SHA-256:', {
+              x: 50,
+              y: metaY - 54,
+              size: 9,
+              font: font,
+              color: rgb(0.5, 0.5, 0.5)
+            })
+            page.drawText(item.photoHash, {
+              x: 110,
+              y: metaY - 54,
+              size: 6,
               font: font,
               color: rgb(0.4, 0.4, 0.4)
             })
@@ -835,6 +978,10 @@ export default function PackPreview() {
               <CheckCircle className="w-3 h-3" />
               Tamper-Proof
             </span>
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-50 text-green-700 rounded text-xs">
+              <QrCode className="w-3 h-3" />
+              QR Verifiable
+            </span>
           </div>
         </div>
 
@@ -884,6 +1031,15 @@ export default function PackPreview() {
                           {(item.evidenceType || '').replace(/_/g, ' ')}
                         </p>
                       </div>
+                      {item.photoStage && (
+                        <div className={`absolute top-1 left-1 px-1 py-0.5 rounded text-[8px] font-medium ${
+                          item.photoStage === 'before' ? 'bg-amber-100 text-amber-700' :
+                          item.photoStage === 'during' ? 'bg-blue-100 text-blue-700' :
+                          'bg-green-100 text-green-700'
+                        }`}>
+                          {item.photoStage}
+                        </div>
+                      )}
                       <div className="absolute top-1 right-1">
                         <CheckCircle className="w-4 h-4 text-green-400 drop-shadow" />
                       </div>
@@ -948,9 +1104,20 @@ export default function PackPreview() {
               </div>
             )}
             <div className="mt-4 text-white space-y-2">
-              <h3 className="font-medium text-lg">
-                {(selectedImage.evidenceType || '').replace(/_/g, ' ')}
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-medium text-lg">
+                  {(selectedImage.evidenceType || '').replace(/_/g, ' ')}
+                </h3>
+                {selectedImage.photoStage && (
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                    selectedImage.photoStage === 'before' ? 'bg-amber-100 text-amber-700' :
+                    selectedImage.photoStage === 'during' ? 'bg-blue-100 text-blue-700' :
+                    'bg-green-100 text-green-700'
+                  }`}>
+                    {selectedImage.photoStage}
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-4 text-sm text-gray-300">
                 <div>
                   <p className="text-gray-500">Captured</p>
@@ -965,7 +1132,13 @@ export default function PackPreview() {
                 {selectedImage.gpsAccuracy && (
                   <div>
                     <p className="text-gray-500">Accuracy</p>
-                    <p>{selectedImage.gpsAccuracy}m</p>
+                    <p>±{selectedImage.gpsAccuracy}m</p>
+                  </div>
+                )}
+                {selectedImage.notes && (
+                  <div className="col-span-2">
+                    <p className="text-gray-500">Notes</p>
+                    <p>{selectedImage.notes}</p>
                   </div>
                 )}
                 {selectedImage.photoHash && (
