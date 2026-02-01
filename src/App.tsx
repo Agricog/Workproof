@@ -18,6 +18,7 @@ const Packs = lazy(() => import('./pages/Packs'))
 const PackPreview = lazy(() => import('./pages/PackPreview'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Profile = lazy(() => import('./pages/Profile'))
+const Verify = lazy(() => import('./pages/Verify'))
 
 // Loading spinner
 function LoadingSpinner() {
@@ -65,6 +66,8 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Navigate to="/dashboard" replace />} />
+            {/* Public verification page - no auth required */}
+            <Route path="/verify/:packId" element={<Verify />} />
             <Route
               path="/dashboard"
               element={
@@ -168,6 +171,8 @@ export default function App() {
           <Routes>
             {/* Public routes */}
             <Route path="/" element={<Landing />} />
+            {/* Public verification page - no auth required */}
+            <Route path="/verify/:packId" element={<Verify />} />
             <Route
               path="/login/*"
               element={
